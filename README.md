@@ -26,4 +26,4 @@
 ## 🚀 نصب سریع (یک خطی)
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/YOUR_USERNAME/Tor-ML-PRO/main/tor-ml.sh) --install
+bash <(curl -Ls https://raw.githubusercontent.com/mrmarzx/Tor-ML-PRO/main/tor-ml.sh) --install
