@@ -1,4 +1,3 @@
-```markdown
 # 🔥 Tor-ML-PRO
 
 **نسخه بهبود یافته، سبک‌تر و حرفه‌ای‌تر مدیریت چند لوکیشن تور**
@@ -100,8 +99,6 @@
 
 ```bash
 curl -Ls https://raw.githubusercontent.com/mrmarzx/Tor-ML-PRO/main/tor-ml.sh | tr -d '\r' > /root/tor-ml.sh && chmod +x /root/tor-ml.sh && bash /root/tor-ml.sh --install
-```
-
 بعد از نصب فقط کافیه بنویسی:
 
 ```bash
