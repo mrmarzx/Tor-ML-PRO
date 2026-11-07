@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  tor-ml v4.1  –  Multi-Exit Tor + Psiphon Manager
+#  tor-ml v4.2  –  Multi-Exit Tor + Psiphon Manager
 #  Modern • Clean • Low-resource • Full featured
-#  Author: mrmarzx  |  Fixed rewrite 2026
-#  Fixes: CRLF install, Psiphon detection, balancer flicker, arm64 message
+#  Author: mrmarzx  |  2026
+#  Fix: install never clears screen, full visible progress
 # =============================================================================
 set -euo pipefail
 shopt -s nullglob 2>/dev/null || true
 
-VERSION="4.1.0"
-# ---------------------------------------------------------------------------
-# Colours (modern palette)
-# ---------------------------------------------------------------------------
+VERSION="4.2.0"
+
+# Colours
 R='\033[1;31m'; G='\033[1;32m'; Y='\033[1;33m'; B='\033[1;34m'
 M='\033[1;35m'; C='\033[1;36m'; W='\033[1;37m'; D='\033[2m'; N='\033[0m'
 OR='\033[1;38;5;208m'; PK='\033[1;38;5;205m'; CY='\033[1;38;5;51m'
 LG='\033[1;38;5;118m'; LB='\033[1;38;5;39m'; LR='\033[1;38;5;196m'
-# ---------------------------------------------------------------------------
+
 # Paths
-# ---------------------------------------------------------------------------
 BASE="/opt/tor-ml"
 CFG="$BASE/config"
 DAT="$BASE/data"
@@ -31,11 +29,9 @@ SETTINGS="$CFG/settings.db"
 GLOBAL="$CFG/global.conf"
 AUTO_PORT=49000
 AUTO_PID_FILE="$STA/auto.pid"
-WATCHDOG_INTERVAL=90
-PERF_MODE="normal"          # weak | normal | max
-# ---------------------------------------------------------------------------
-# Tor Locations (ISO : Name : default SOCKS port)
-# ---------------------------------------------------------------------------
+PERF_MODE="normal"
+
+# Tor Locations
 declare -A TOR_LOC=(
   [01]="DE:Germany:48180"
   [02]="TR:Turkey:48181"
@@ -100,10 +96,7 @@ declare -A TOR_LOC=(
 )
 TOR_ORDER=({01..60})
 
-# ---------------------------------------------------------------------------
-# Psiphon Locations (common working egress regions)
-# Ports start from 49100
-# ---------------------------------------------------------------------------
+# Psiphon Locations
 declare -A PSI_LOC=(
   [P01]="DE:Germany:49100"
   [P02]="US:United States:49101"
@@ -173,9 +166,6 @@ save_global() {
   echo "perf=${PERF_MODE}" > "$GLOBAL"
 }
 
-# ---------------------------------------------------------------------------
-# Settings DB  (id:port:bw:uptime:sticky:type)
-# ---------------------------------------------------------------------------
 get_setting() {
   local id=$1 field=$2
   local line
@@ -234,9 +224,6 @@ migrate_settings() {
   done
 }
 
-# ---------------------------------------------------------------------------
-# Info helpers
-# ---------------------------------------------------------------------------
 info() {
   local id=$1
   local code name port
@@ -259,7 +246,6 @@ running_tor() {
   pgrep -f "tor -f $CFG/node_${code}_${port}.conf" >/dev/null 2>&1
 }
 
-# Fixed: reliable pid-file + port check (no operator-precedence bug)
 running_psi() {
   local code=$1 port=$2
   if [[ -f "$STA/psi_${code}_${port}.pid" ]]; then
@@ -269,7 +255,6 @@ running_psi() {
       return 0
     fi
   fi
-  # Fallback: something listening on the port
   if nc -z 127.0.0.1 "$port" 2>/dev/null; then
     return 0
   fi
@@ -326,9 +311,6 @@ list_running_psi() {
   echo "${out[*]}"
 }
 
-# ---------------------------------------------------------------------------
-# Stats
-# ---------------------------------------------------------------------------
 get_stats() {
   local cpu=0 mem=0 cnt=0
   local pids
@@ -352,9 +334,6 @@ get_node_stats() {
   ps -p "$pid" -o %cpu=,%mem= --no-headers 2>/dev/null || echo "0.0 0.0"
 }
 
-# ---------------------------------------------------------------------------
-# Bootstrap / IP
-# ---------------------------------------------------------------------------
 check_bootstrap() {
   local logfile=$1 port=$2 typ=${3:-tor}
   if nc -z 127.0.0.1 "$port" 2>/dev/null; then
@@ -411,9 +390,6 @@ format_uptime() {
 line()  { echo -e "${D}──────────────────────────────────────────────────────────────${N}"; }
 line2() { echo -e "${D}══════════════════════════════════════════════════════════════${N}"; }
 
-# ---------------------------------------------------------------------------
-# Performance profiles
-# ---------------------------------------------------------------------------
 get_perf_params() {
   case "$PERF_MODE" in
     weak)
@@ -449,9 +425,7 @@ NumCPUs 1"
   esac
 }
 
-# ---------------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------------
+# Header is ONLY for interactive menu – NEVER used in install
 header() {
   clear
   load_global
@@ -475,9 +449,6 @@ header() {
   echo
 }
 
-# ---------------------------------------------------------------------------
-# Tor config writer
-# ---------------------------------------------------------------------------
 write_tor_conf() {
   local code=$1 port=$2 dir=$3 logfile=$4 bw=$5 sticky=$6
   local perf_extra
@@ -518,9 +489,6 @@ EOF
   chmod 600 "$CFG/node_${code}_${port}.conf" 2>/dev/null || true
 }
 
-# ---------------------------------------------------------------------------
-# Psiphon binary + config
-# ---------------------------------------------------------------------------
 ensure_psiphon_binary() {
   local bin="$BIN/psiphon-tunnel-core"
   if [[ -x "$bin" ]]; then
@@ -550,7 +518,7 @@ ensure_psiphon_binary() {
     return 1
   fi
   chmod +x "$bin"
-  if ! file "$bin" | grep -q "executable"; then
+  if ! file "$bin" 2>/dev/null | grep -q "executable"; then
     echo -e "  ${R}Downloaded file is not a valid binary${N}"
     rm -f "$bin"
     return 1
@@ -576,9 +544,6 @@ write_psi_conf() {
 EOF
 }
 
-# ---------------------------------------------------------------------------
-# Start / Stop single node
-# ---------------------------------------------------------------------------
 start_one() {
   local id=$1
   local code name port
@@ -630,7 +595,6 @@ start_one() {
     [[ -s "$logfile" ]] && tail -n 5 "$logfile" | sed 's/^/    /'
     return 1
   else
-    # Psiphon
     ensure_psiphon_binary || return 1
     local dir="$DAT/psi_${code}_${port}"
     local logfile="$LOG/psi_${code}_${port}.log"
@@ -651,7 +615,6 @@ start_one() {
     nohup "$BIN/psiphon-tunnel-core" -config "$conf" >> "$logfile" 2>&1 &
     local pid=$!
     echo "$pid" > "$STA/psi_${code}_${port}.pid"
-    # Longer wait for Psiphon server-list download
     local i=0
     while ! nc -z 127.0.0.1 "$port" 2>/dev/null && (( i < 40 )); do
       sleep 0.5
@@ -698,9 +661,6 @@ stop_one() {
   echo -e "  ${G}✓${N} $name [${code}] stopped"
 }
 
-# ---------------------------------------------------------------------------
-# Auto / Balancer – only restart socat when best port changes (no flicker)
-# ---------------------------------------------------------------------------
 auto_start() {
   if [[ -f "$AUTO_PID_FILE" ]] && kill -0 "$(cat "$AUTO_PID_FILE" 2>/dev/null)" 2>/dev/null; then
     echo -e "  ${Y}•${N} Auto balancer already running"
@@ -756,9 +716,6 @@ auto_stop() {
   fi
 }
 
-# ---------------------------------------------------------------------------
-# UI
-# ---------------------------------------------------------------------------
 show_running_table() {
   local ids
   ids=$(list_running)
@@ -1102,9 +1059,6 @@ view_log() {
   read -rp "  Press Enter..."
 }
 
-# ---------------------------------------------------------------------------
-# Uninstall
-# ---------------------------------------------------------------------------
 uninstall() {
   header
   echo -e "  ${R}WARNING: Complete removal of tor-ml + Psiphon data${N}"
@@ -1138,17 +1092,21 @@ uninstall() {
   exit 0
 }
 
-# ---------------------------------------------------------------------------
-# Install
-# ---------------------------------------------------------------------------
+# =============================================================================
+# INSTALL – NEVER calls clear / header. Full visible progress.
+# =============================================================================
 install() {
   need_root
-  header
+
+  echo
+  echo -e "  ${LB}████  tor-ml v${VERSION}  –  Installer${N}"
+  echo -e "  ${D}════════════════════════════════════════${N}"
+  echo
+
   if [[ -d "$BASE" ]]; then
-    echo -e "  ${Y}Previous installation detected at $BASE${N}"
-    echo -e "  ${D}Version may be incompatible with v${VERSION}${N}"
-    echo
-    read -rp "$(echo -e "  ${C}Remove old version and install fresh? [y/N]: ${N}")" ans
+    echo -e "  ${Y}Previous installation found at $BASE${N}"
+    echo -ne "  Remove old version and install fresh? [y/N]: "
+    read -r ans
     case "${ans,,}" in
       y|yes)
         echo -e "  ${Y}Cleaning old version...${N}"
@@ -1165,51 +1123,55 @@ install() {
         exit 0
         ;;
     esac
+    echo
   fi
 
-  echo -e "  ${C}Installing tor-ml v${VERSION} ...${N}"
-  echo
-  echo -e "  ${D}Updating package lists...${N}"
+  echo -e "  ${C}[1/6]${N} Updating package lists..."
   apt-get update -qq
-  echo -e "  ${D}Installing dependencies (tor, curl, socat, ...)...${N}"
+  echo -e "  ${G}      done${N}"
+
+  echo -e "  ${C}[2/6]${N} Installing dependencies (tor, curl, socat, netcat)..."
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     tor tor-geoipdb curl bc netcat-openbsd socat >/dev/null 2>&1 || true
+  echo -e "  ${G}      done${N}"
 
+  echo -e "  ${C}[3/6]${N} Creating debian-tor user if needed..."
   if ! id debian-tor &>/dev/null; then
     useradd --system --home-dir /var/lib/tor --shell /usr/sbin/nologin debian-tor 2>/dev/null || true
   fi
-
   systemctl stop tor 2>/dev/null || true
   systemctl disable tor 2>/dev/null || true
+  echo -e "  ${G}      done${N}"
 
+  echo -e "  ${C}[4/6]${N} Creating directories..."
   mkdir -p "$CFG" "$DAT" "$LOG" "$STA" "$BIN" "$PSI"
   chown -R debian-tor:debian-tor "$DAT" "$LOG" 2>/dev/null || true
+  echo -e "  ${G}      done${N}"
 
-  # Always install clean LF version of ourselves
+  echo -e "  ${C}[5/6]${N} Installing tor-ml command..."
+  # Copy ourselves with CR stripped
   if [[ -f "$0" ]]; then
     tr -d '\r' < "$0" > "$CMD"
   else
     cp "$0" "$CMD" 2>/dev/null || true
   fi
   chmod +x "$CMD"
-
   init_dirs
   migrate_settings
   echo "perf=normal" > "$GLOBAL"
+  echo -e "  ${G}      done  →  ${W}$CMD${N}"
 
-  echo -e "  ${D}Preparing Psiphon binary (if supported)...${N}"
+  echo -e "  ${C}[6/6]${N} Preparing Psiphon binary (x86_64 only)..."
   ensure_psiphon_binary || true
 
   echo
-  echo -e "  ${G}Installation complete!${N}"
-  echo -e "  Run:  ${W}tor${N}"
+  echo -e "  ${G}════════════════════════════════════════${N}"
+  echo -e "  ${G}✓ Installation complete!${N}"
   echo
-  sleep 2
+  echo -e "  Run the manager with:  ${W}tor${N}"
+  echo
 }
 
-# ---------------------------------------------------------------------------
-# Main menu
-# ---------------------------------------------------------------------------
 main() {
   ulimit -n 65535 2>/dev/null || true
   init_dirs
@@ -1272,9 +1234,7 @@ main() {
   done
 }
 
-# ---------------------------------------------------------------------------
 # Entry
-# ---------------------------------------------------------------------------
 if [[ "${1:-}" == "--install" ]]; then
   install
   exit 0
