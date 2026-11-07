@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  tor-ml v4  –  Multi-Exit Tor + Psiphon Manager
+#  tor-ml v4.1  –  Multi-Exit Tor + Psiphon Manager
 #  Modern • Clean • Low-resource • Full featured
-#  Author: mrmarzx  |  Optimized rewrite 2026
+#  Author: mrmarzx  |  Fixed rewrite 2026
+#  Fixes: CRLF install, Psiphon detection, balancer flicker, arm64 message
 # =============================================================================
 set -euo pipefail
 shopt -s nullglob 2>/dev/null || true
 
-VERSION="4.0.0"
+VERSION="4.1.0"
 # ---------------------------------------------------------------------------
 # Colours (modern palette)
 # ---------------------------------------------------------------------------
@@ -144,7 +145,6 @@ need_root() {
 
 parse_id() {
   local raw=$1
-  # Accept 1, 01, P1, p01, etc.
   if [[ "$raw" =~ ^[Pp]([0-9]+)$ ]]; then
     printf "P%02d" "$((10#${BASH_REMATCH[1]}))"
   elif [[ "$raw" =~ ^[0-9]+$ ]]; then
@@ -165,7 +165,6 @@ init_dirs() {
 
 load_global() {
   [[ -f "$GLOBAL" ]] || return
-  # shellcheck disable=SC1090
   source <(grep -E '^[a-zA-Z_]+=' "$GLOBAL" 2>/dev/null || true)
   PERF_MODE="${perf:-normal}"
 }
@@ -260,11 +259,21 @@ running_tor() {
   pgrep -f "tor -f $CFG/node_${code}_${port}.conf" >/dev/null 2>&1
 }
 
+# Fixed: reliable pid-file + port check (no operator-precedence bug)
 running_psi() {
   local code=$1 port=$2
-  pgrep -f "psiphon-tunnel-core.*LocalSocksProxyPort.*${port}" >/dev/null 2>&1 \
-    || pgrep -f "psiphon.*${code}.*${port}" >/dev/null 2>&1 \
-    || [[ -f "$STA/psi_${code}_${port}.pid" ]] && kill -0 "$(cat "$STA/psi_${code}_${port}.pid" 2>/dev/null)" 2>/dev/null
+  if [[ -f "$STA/psi_${code}_${port}.pid" ]]; then
+    local pid
+    pid=$(cat "$STA/psi_${code}_${port}.pid" 2>/dev/null || true)
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  # Fallback: something listening on the port
+  if nc -z 127.0.0.1 "$port" 2>/dev/null; then
+    return 0
+  fi
+  return 1
 }
 
 running() {
@@ -288,7 +297,7 @@ get_pid() {
     if [[ -f "$STA/psi_${code}_${port}.pid" ]]; then
       cat "$STA/psi_${code}_${port}.pid" 2>/dev/null || true
     else
-      pgrep -f "psiphon.*${port}" 2>/dev/null | head -1 || true
+      pgrep -f "psiphon-tunnel-core" 2>/dev/null | head -1 || true
     fi
   fi
 }
@@ -361,7 +370,7 @@ check_bootstrap() {
       echo "Inactive"
     fi
   else
-    if grep -qE "Tunnels|ListeningSocksProxyPort|Connected" "$logfile" 2>/dev/null; then
+    if grep -qE "Tunnels|ListeningSocksProxyPort|Connected|established" "$logfile" 2>/dev/null; then
       echo "Active"
     elif [[ -s "$logfile" ]]; then
       echo "Connecting"
@@ -403,7 +412,7 @@ line()  { echo -e "${D}───────────────────
 line2() { echo -e "${D}══════════════════════════════════════════════════════════════${N}"; }
 
 # ---------------------------------------------------------------------------
-# Performance profiles (affects Tor config + process niceness)
+# Performance profiles
 # ---------------------------------------------------------------------------
 get_perf_params() {
   case "$PERF_MODE" in
@@ -427,7 +436,7 @@ NewCircuitPeriod 40
 MaxCircuitDirtiness 400
 NumCPUs 0"
       ;;
-    *) # normal
+    *)
       echo "MaxMemInQueues 32 MB
 NumEntryGuards 2
 CircuitBuildTimeout 15
@@ -441,7 +450,7 @@ NumCPUs 1"
 }
 
 # ---------------------------------------------------------------------------
-# Header (modern)
+# Header
 # ---------------------------------------------------------------------------
 header() {
   clear
@@ -474,7 +483,7 @@ write_tor_conf() {
   local perf_extra
   perf_extra=$(get_perf_params)
   cat > "$CFG/node_${code}_${port}.conf" <<EOF
-# tor-ml v4 – ${PERF_MODE} profile
+# tor-ml v${VERSION} – ${PERF_MODE} profile
 SocksPort 127.0.0.1:$port IsolateDestAddr IsolateDestPort
 DataDirectory $dir
 ExitNodes {$code}
@@ -510,7 +519,7 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Psiphon config + binary
+# Psiphon binary + config
 # ---------------------------------------------------------------------------
 ensure_psiphon_binary() {
   local bin="$BIN/psiphon-tunnel-core"
@@ -521,15 +530,31 @@ ensure_psiphon_binary() {
   local arch url
   arch=$(uname -m)
   case "$arch" in
-    x86_64|amd64) url="https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core-binaries/master/linux/psiphon-tunnel-core-x86_64" ;;
-    aarch64|arm64) url="https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core-binaries/master/linux/psiphon-tunnel-core-arm64" ;;
-    *) echo -e "  ${R}Unsupported arch: $arch${N}"; return 1 ;;
+    x86_64|amd64)
+      url="https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core-binaries/master/linux/psiphon-tunnel-core-x86_64"
+      ;;
+    aarch64|arm64)
+      echo -e "  ${R}Official Psiphon binary for ARM64 is not published by Psiphon-Labs.${N}"
+      echo -e "  ${D}Psiphon locations will not work on this architecture.${N}"
+      echo -e "  ${D}Tor locations work normally.${N}"
+      return 1
+      ;;
+    *)
+      echo -e "  ${R}Unsupported architecture: $arch${N}"
+      return 1
+      ;;
   esac
-  if ! curl -fsSL --retry 3 -o "$bin" "$url"; then
+  if ! curl -fsSL --retry 3 --connect-timeout 15 -o "$bin" "$url"; then
     echo -e "  ${R}Failed to download Psiphon binary${N}"
+    rm -f "$bin"
     return 1
   fi
   chmod +x "$bin"
+  if ! file "$bin" | grep -q "executable"; then
+    echo -e "  ${R}Downloaded file is not a valid binary${N}"
+    rm -f "$bin"
+    return 1
+  fi
   echo -e "  ${G}✓ Psiphon binary ready${N}"
 }
 
@@ -590,7 +615,6 @@ start_one() {
     done
     if running_tor "$code" "$port"; then
       set_setting "$id" "uptime" "$(date +%s)"
-      # nice according to mode
       local pid
       pid=$(get_pid "$id")
       if [[ -n "$pid" ]]; then
@@ -617,16 +641,22 @@ start_one() {
       echo -e "  ${Y}•${N} $name [${code}] (Psiphon) already running on $port"
       return 0
     fi
-    pkill -f "psiphon.*${port}" 2>/dev/null || true
+    if [[ -f "$STA/psi_${code}_${port}.pid" ]]; then
+      kill "$(cat "$STA/psi_${code}_${port}.pid" 2>/dev/null)" 2>/dev/null || true
+      rm -f "$STA/psi_${code}_${port}.pid"
+    fi
+    pkill -f "psiphon-tunnel-core.*${port}" 2>/dev/null || true
     sleep 0.2
     : > "$logfile"
     nohup "$BIN/psiphon-tunnel-core" -config "$conf" >> "$logfile" 2>&1 &
     local pid=$!
     echo "$pid" > "$STA/psi_${code}_${port}.pid"
+    # Longer wait for Psiphon server-list download
     local i=0
-    while ! nc -z 127.0.0.1 "$port" 2>/dev/null && (( i < 25 )); do
-      sleep 0.4
+    while ! nc -z 127.0.0.1 "$port" 2>/dev/null && (( i < 40 )); do
+      sleep 0.5
       i=$((i+1))
+      kill -0 "$pid" 2>/dev/null || break
     done
     if nc -z 127.0.0.1 "$port" 2>/dev/null; then
       set_setting "$id" "uptime" "$(date +%s)"
@@ -634,7 +664,7 @@ start_one() {
       return 0
     fi
     echo -e "  ${R}✗${N} $name [${code}] Psiphon failed / still connecting"
-    [[ -s "$logfile" ]] && tail -n 6 "$logfile" | sed 's/^/    /'
+    [[ -s "$logfile" ]] && tail -n 8 "$logfile" | sed 's/^/    /'
     return 1
   fi
 }
@@ -660,8 +690,8 @@ stop_one() {
       kill -9 "$(cat "$STA/psi_${code}_${port}.pid")" 2>/dev/null || true
       rm -f "$STA/psi_${code}_${port}.pid"
     fi
-    pkill -f "psiphon.*${port}" 2>/dev/null || true
-    pkill -9 -f "psiphon.*${port}" 2>/dev/null || true
+    pkill -f "psiphon-tunnel-core" 2>/dev/null || true
+    sleep 0.1
   fi
   set_setting "$id" "uptime" "0"
   rm -f "$STA/${code}_${port}.ip" 2>/dev/null || true
@@ -669,7 +699,7 @@ stop_one() {
 }
 
 # ---------------------------------------------------------------------------
-# Auto / Balancer (best-ping + optional sticky)
+# Auto / Balancer – only restart socat when best port changes (no flicker)
 # ---------------------------------------------------------------------------
 auto_start() {
   if [[ -f "$AUTO_PID_FILE" ]] && kill -0 "$(cat "$AUTO_PID_FILE" 2>/dev/null)" 2>/dev/null; then
@@ -677,6 +707,7 @@ auto_start() {
     return
   fi
   (
+    local last_port=""
     while true; do
       local best_port="" best_lat=99999 best_id=""
       local ids
@@ -697,16 +728,20 @@ auto_start() {
       if [[ -n "$best_port" ]]; then
         echo "$best_port" > "$STA/best.port"
         echo "$best_id" > "$STA/best.id"
-        pkill -f "socat.*TCP-LISTEN:$AUTO_PORT" 2>/dev/null || true
-        socat TCP-LISTEN:$AUTO_PORT,fork,reuseaddr,bind=127.0.0.1 TCP:127.0.0.1:$best_port >/dev/null 2>&1 &
-        echo $! > "$STA/socat.pid"
+        if [[ "$best_port" != "$last_port" ]]; then
+          pkill -f "socat.*TCP-LISTEN:$AUTO_PORT" 2>/dev/null || true
+          sleep 0.15
+          socat TCP-LISTEN:$AUTO_PORT,fork,reuseaddr,bind=127.0.0.1 TCP:127.0.0.1:$best_port >/dev/null 2>&1 &
+          echo $! > "$STA/socat.pid"
+          last_port="$best_port"
+        fi
       fi
       sleep 40
     done
   ) &
   echo $! > "$AUTO_PID_FILE"
   echo -e "  ${G}✓${N} Auto balancer started on port ${W}$AUTO_PORT${N}"
-  echo -e "  ${D}  mixes Tor + Psiphon, picks lowest latency${N}"
+  echo -e "  ${D}  mixes Tor + Psiphon, picks lowest latency (no flicker when same)${N}"
 }
 
 auto_stop() {
@@ -978,7 +1013,6 @@ set_bandwidth() {
   sleep 1.3
 }
 
-# Performance mode selector
 set_perf_mode() {
   header
   echo -e "  ${C}Bandwidth / Performance Profile${N}"
@@ -989,7 +1023,7 @@ set_perf_mode() {
   echo
   echo -e "  Current: ${W}${PERF_MODE}${N}"
   echo
-  echo -e "  ${D}Use ↑↓ conceptually or just type 1/2/3  (or weak/normal/max)${N}"
+  echo -e "  ${D}Type 1 / 2 / 3  or  weak / normal / max${N}"
   echo
   read -rp "$(echo -e "  ${M}Select: ${N}")" choice
   case "$choice" in
@@ -1069,7 +1103,7 @@ view_log() {
 }
 
 # ---------------------------------------------------------------------------
-# Uninstall – real complete removal
+# Uninstall
 # ---------------------------------------------------------------------------
 uninstall() {
   header
@@ -1099,7 +1133,6 @@ uninstall() {
   echo -e "  ${Y}Removing files...${N}"
   rm -rf "$BASE"
   rm -f "$CMD"
-  # also clean any old leftover
   rm -rf /opt/tor-ml 2>/dev/null || true
   echo -e "  ${G}✓ tor-ml completely removed from the system.${N}"
   exit 0
@@ -1136,7 +1169,9 @@ install() {
 
   echo -e "  ${C}Installing tor-ml v${VERSION} ...${N}"
   echo
+  echo -e "  ${D}Updating package lists...${N}"
   apt-get update -qq
+  echo -e "  ${D}Installing dependencies (tor, curl, socat, ...)...${N}"
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     tor tor-geoipdb curl bc netcat-openbsd socat >/dev/null 2>&1 || true
 
@@ -1150,15 +1185,19 @@ install() {
   mkdir -p "$CFG" "$DAT" "$LOG" "$STA" "$BIN" "$PSI"
   chown -R debian-tor:debian-tor "$DAT" "$LOG" 2>/dev/null || true
 
-  # install self
-  cp "$0" "$CMD"
+  # Always install clean LF version of ourselves
+  if [[ -f "$0" ]]; then
+    tr -d '\r' < "$0" > "$CMD"
+  else
+    cp "$0" "$CMD" 2>/dev/null || true
+  fi
   chmod +x "$CMD"
 
   init_dirs
   migrate_settings
   echo "perf=normal" > "$GLOBAL"
 
-  # optional: pre-download Psiphon binary
+  echo -e "  ${D}Preparing Psiphon binary (if supported)...${N}"
   ensure_psiphon_binary || true
 
   echo
@@ -1177,13 +1216,11 @@ main() {
   migrate_settings
   load_global
 
-  # light watchdog once
   if ! pgrep -f "tor-ml-watchdog" >/dev/null 2>&1; then
     (
       exec -a tor-ml-watchdog bash -c '
         while true; do
           sleep 90
-          # restart dead nodes that were marked running
           for f in /opt/tor-ml/status/*.pid; do
             [[ -f "$f" ]] || continue
             pid=$(cat "$f" 2>/dev/null)
