@@ -1,102 +1,113 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  tor-ml v4.3.1  –  Multi-Exit Tor + Psiphon Manager
-#  Modern • Clean • Low-resource • Full featured
-#  Author: mrmarzx  |  2026
-#  Fix: install never clears screen, full visible progress
+# tor-ml v4.4  –  Multi Tor + Psiphon Manager + Web Panel 1.1
+# Full production script: CLI menu, JSON API for web, balancer, perf modes,
+# sticky exit, bandwidth, logs, port change, watchdog, SSL-ready install,
+# complete uninstall. Optimized for low-end VPS, works on Ubuntu 20/22/24.
 # =============================================================================
 set -euo pipefail
-shopt -s nullglob 2>/dev/null || true
 
-VERSION="4.3.1"
+VERSION="4.4"
+PANEL_VER="1.1"
 
+# ---------------------------------------------------------------------------
 # Colours
+# ---------------------------------------------------------------------------
 R='\033[1;31m'; G='\033[1;32m'; Y='\033[1;33m'; B='\033[1;34m'
 M='\033[1;35m'; C='\033[1;36m'; W='\033[1;37m'; D='\033[2m'; N='\033[0m'
-OR='\033[1;38;5;208m'; PK='\033[1;38;5;205m'; CY='\033[1;38;5;51m'
-LG='\033[1;38;5;118m'; LB='\033[1;38;5;39m'; LR='\033[1;38;5;196m'
+OR='\033[1;38;5;208m'; PK='\033[1;38;5;205m'
 
+# ---------------------------------------------------------------------------
 # Paths
+# ---------------------------------------------------------------------------
 BASE="/opt/tor-ml"
 CFG="$BASE/config"
 DAT="$BASE/data"
 LOG="$BASE/logs"
 STA="$BASE/status"
 BIN="$BASE/bin"
-PSI="$BASE/psiphon"
+WEB="$BASE/web"
 CMD="/usr/local/bin/tor"
 SETTINGS="$CFG/settings.db"
-GLOBAL="$CFG/global.conf"
+PERF_FILE="$CFG/perf.mode"
+PANEL_JSON="$CFG/panel.json"
+TOKEN_FILE="$CFG/api.token"
 AUTO_PORT=49000
 AUTO_PID_FILE="$STA/auto.pid"
-PERF_MODE="normal"
+AUTO_TARGET_FILE="$STA/auto.target"
+WATCHDOG_PID_FILE="$STA/watchdog.pid"
+PSI_BIN="$BIN/psiphon-tunnel-core"
+SELF_SCRIPT="$BASE/tor-ml.sh"
 
-# Tor Locations
+# ---------------------------------------------------------------------------
+# Tor locations  ID -> CC:Name:default_port
+# ---------------------------------------------------------------------------
 declare -A TOR_LOC=(
-  [01]="DE:Germany:48180"
-  [02]="TR:Turkey:48181"
-  [03]="US:United States:48182"
-  [04]="FR:France:48183"
-  [05]="AT:Austria:48184"
-  [06]="BE:Belgium:48185"
-  [07]="RO:Romania:48186"
-  [08]="CA:Canada:48187"
-  [09]="SG:Singapore:48188"
-  [10]="JP:Japan:48189"
-  [11]="IE:Ireland:48190"
-  [12]="FI:Finland:48191"
-  [13]="ES:Spain:48192"
-  [14]="PL:Poland:48193"
-  [15]="NL:Netherlands:48194"
-  [16]="IT:Italy:48195"
-  [17]="CH:Switzerland:48196"
-  [18]="SE:Sweden:48197"
-  [19]="NO:Norway:48198"
-  [20]="DK:Denmark:48199"
-  [21]="IS:Iceland:48200"
-  [22]="AU:Australia:48201"
-  [23]="IN:India:48202"
-  [24]="HK:Hong Kong:48203"
-  [25]="UA:Ukraine:48204"
-  [26]="CZ:Czech Republic:48205"
-  [27]="KR:South Korea:48206"
-  [28]="ZA:South Africa:48207"
-  [29]="MX:Mexico:48208"
-  [30]="MY:Malaysia:48209"
-  [31]="AZ:Azerbaijan:48210"
-  [32]="CY:Cyprus:48211"
-  [33]="GR:Greece:48212"
-  [34]="PT:Portugal:48213"
-  [35]="HU:Hungary:48214"
-  [36]="LU:Luxembourg:48215"
-  [37]="GB:United Kingdom:48216"
-  [38]="AR:Argentina:48217"
-  [39]="TW:Taiwan:48218"
-  [40]="BG:Bulgaria:48219"
-  [41]="IL:Israel:48220"
-  [42]="MD:Moldova:48221"
-  [43]="RU:Russia:48222"
-  [44]="CL:Chile:48223"
-  [45]="CR:Costa Rica:48224"
-  [46]="VN:Vietnam:48225"
-  [47]="ID:Indonesia:48226"
-  [48]="SC:Seychelles:48227"
-  [49]="HR:Croatia:48228"
-  [50]="TN:Tunisia:48229"
-  [51]="BR:Brazil:48230"
-  [52]="TH:Thailand:48231"
-  [53]="PH:Philippines:48232"
-  [54]="NZ:New Zealand:48233"
-  [55]="EE:Estonia:48234"
-  [56]="LT:Lithuania:48235"
-  [57]="LV:Latvia:48236"
-  [58]="SK:Slovakia:48237"
-  [59]="SI:Slovenia:48238"
-  [60]="RS:Serbia:48239"
+  [T01]="DE:Germany:48180"
+  [T02]="US:United States:48181"
+  [T03]="NL:Netherlands:48182"
+  [T04]="FR:France:48183"
+  [T05]="GB:United Kingdom:48184"
+  [T06]="CA:Canada:48185"
+  [T07]="SG:Singapore:48186"
+  [T08]="JP:Japan:48187"
+  [T09]="SE:Sweden:48188"
+  [T10]="CH:Switzerland:48189"
+  [T11]="AT:Austria:48190"
+  [T12]="BE:Belgium:48191"
+  [T13]="PL:Poland:48192"
+  [T14]="IT:Italy:48193"
+  [T15]="ES:Spain:48194"
+  [T16]="NO:Norway:48195"
+  [T17]="DK:Denmark:48196"
+  [T18]="FI:Finland:48197"
+  [T19]="IE:Ireland:48198"
+  [T20]="AU:Australia:48199"
+  [T21]="BR:Brazil:48200"
+  [T22]="IN:India:48201"
+  [T23]="KR:South Korea:48202"
+  [T24]="HK:Hong Kong:48203"
+  [T25]="TR:Turkey:48204"
+  [T26]="RO:Romania:48205"
+  [T27]="CZ:Czech Republic:48206"
+  [T28]="PT:Portugal:48207"
+  [T29]="UA:Ukraine:48208"
+  [T30]="MX:Mexico:48209"
+  [T31]="AR:Argentina:48210"
+  [T32]="CL:Chile:48211"
+  [T33]="ZA:South Africa:48212"
+  [T34]="IL:Israel:48213"
+  [T35]="AE:United Arab Emirates:48214"
+  [T36]="TH:Thailand:48215"
+  [T37]="MY:Malaysia:48216"
+  [T38]="ID:Indonesia:48217"
+  [T39]="PH:Philippines:48218"
+  [T40]="NZ:New Zealand:48219"
+  [T41]="HU:Hungary:48220"
+  [T42]="GR:Greece:48221"
+  [T43]="BG:Bulgaria:48222"
+  [T44]="HR:Croatia:48223"
+  [T45]="SK:Slovakia:48224"
+  [T46]="SI:Slovenia:48225"
+  [T47]="LT:Lithuania:48226"
+  [T48]="LV:Latvia:48227"
+  [T49]="EE:Estonia:48228"
+  [T50]="IS:Iceland:48229"
+  [T51]="LU:Luxembourg:48230"
+  [T52]="MD:Moldova:48231"
+  [T53]="RS:Serbia:48232"
+  [T54]="TW:Taiwan:48233"
+  [T55]="VN:Vietnam:48234"
+  [T56]="CR:Costa Rica:48235"
+  [T57]="PA:Panama:48236"
+  [T58]="CO:Colombia:48237"
+  [T59]="PE:Peru:48238"
+  [T60]="NG:Nigeria:48239"
 )
-TOR_ORDER=({01..60})
+TOR_ORDER=()
+for __i in $(seq -w 1 60); do TOR_ORDER+=("T${__i}"); done
 
-# Psiphon Locations
+# Psiphon egress regions
 declare -A PSI_LOC=(
   [P01]="DE:Germany:49100"
   [P02]="US:United States:49101"
@@ -115,267 +126,251 @@ declare -A PSI_LOC=(
   [P15]="IT:Italy:49114"
   [P16]="ES:Spain:49115"
   [P17]="RO:Romania:49116"
-  [P18]="CZ:Czechia:49117"
-  [P19]="DK:Denmark:49118"
-  [P20]="FI:Finland:49119"
-  [P21]="NO:Norway:49120"
-  [P22]="IE:Ireland:49121"
-  [P23]="IN:India:49122"
-  [P24]="BR:Brazil:49123"
-  [P25]="RS:Serbia:49124"
-  [P26]="ID:Indonesia:49125"
-  [P27]="LT:Lithuania:49126"
-  [P28]="KR:South Korea:49127"
+  [P18]="NO:Norway:49120"
+  [P19]="IE:Ireland:49121"
+  [P20]="IN:India:49122"
+  [P21]="BR:Brazil:49123"
+  [P22]="HK:Hong Kong:49124"
+  [P23]="KR:South Korea:49125"
+  [P24]="MX:Mexico:49126"
+  [P25]="TR:Turkey:49127"
+  [P26]="ZA:South Africa:49128"
+  [P27]="AR:Argentina:49129"
+  [P28]="DK:Denmark:49130"
 )
-PSI_ORDER=(P01 P02 P03 P04 P05 P06 P07 P08 P09 P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20 P21 P22 P23 P24 P25 P26 P27 P28)
+PSI_ORDER=()
+for __i in $(seq -w 1 28); do PSI_ORDER+=("P${__i}"); done
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Core helpers
 # ---------------------------------------------------------------------------
 need_root() {
-  [[ $EUID -eq 0 ]] || { echo -e "${R}[!] Must run as root${N}"; exit 1; }
+  [[ ${EUID:-0} -eq 0 ]] || { echo -e "${R}[!] Run as root (sudo su)${N}"; exit 1; }
 }
 
-parse_id() {
-  local raw=$1
-  if [[ "$raw" =~ ^[Pp]([0-9]+)$ ]]; then
-    printf "P%02d" "$((10#${BASH_REMATCH[1]}))"
-  elif [[ "$raw" =~ ^[0-9]+$ ]]; then
-    printf "%02d" "$((10#$raw))"
-  else
-    echo ""
+init_dirs() {
+  mkdir -p "$CFG" "$DAT" "$LOG" "$STA" "$BIN" "$WEB"
+  touch "$SETTINGS"
+  [[ -f "$PERF_FILE" ]] || echo "normal" > "$PERF_FILE"
+  if [[ ! -f "$TOKEN_FILE" ]]; then
+    tr -dc 'a-f0-9' </dev/urandom 2>/dev/null | head -c 48 > "$TOKEN_FILE" || openssl rand -hex 24 > "$TOKEN_FILE"
+    chmod 600 "$TOKEN_FILE"
   fi
 }
 
-is_tor_id()   { [[ -n ${TOR_LOC[$1]+x} ]]; }
-is_psi_id()   { [[ -n ${PSI_LOC[$1]+x} ]]; }
+api_token() { cat "$TOKEN_FILE" 2>/dev/null || echo ""; }
 
-init_dirs() {
-  mkdir -p "$CFG" "$DAT" "$LOG" "$STA" "$BIN" "$PSI"
-  touch "$SETTINGS"
-  [[ -f "$GLOBAL" ]] || echo "perf=normal" > "$GLOBAL"
+line() { echo -e "${D}──────────────────────────────────────────────────────────────${N}"; }
+
+pause() { read -rp "$(echo -e "  ${D}Press Enter...${N}")" _; }
+
+# ---------------------------------------------------------------------------
+# Performance mode (fixes load_perf: command not found)
+# ---------------------------------------------------------------------------
+load_perf() {
+  local m
+  m=$(cat "$PERF_FILE" 2>/dev/null || echo normal)
+  case "$m" in
+    weak|normal|max) printf '%s' "$m" ;;
+    *) printf '%s' "normal" ;;
+  esac
 }
 
-load_global() {
-  [[ -f "$GLOBAL" ]] || return
-  source <(grep -E '^[a-zA-Z_]+=' "$GLOBAL" 2>/dev/null || true)
-  PERF_MODE="${perf:-normal}"
+save_perf() {
+  local m=${1:-normal}
+  case "$m" in
+    weak|1) echo weak > "$PERF_FILE" ;;
+    max|3|maximum) echo max > "$PERF_FILE" ;;
+    *) echo normal > "$PERF_FILE" ;;
+  esac
 }
 
-save_global() {
-  echo "perf=${PERF_MODE}" > "$GLOBAL"
+perf_tor_extra() {
+  case "$(load_perf)" in
+    weak)
+      cat <<'EOF'
+MaxMemInQueues 16 MB
+NumEntryGuards 1
+CircuitBuildTimeout 20
+MaxClientCircuitsPending 2
+KeepalivePeriod 60
+NewCircuitPeriod 90
+MaxCircuitDirtiness 900
+EOF
+      ;;
+    max)
+      cat <<'EOF'
+MaxMemInQueues 64 MB
+NumEntryGuards 3
+CircuitBuildTimeout 12
+MaxClientCircuitsPending 8
+KeepalivePeriod 30
+NewCircuitPeriod 45
+MaxCircuitDirtiness 400
+EOF
+      ;;
+    *)
+      cat <<'EOF'
+MaxMemInQueues 32 MB
+NumEntryGuards 2
+CircuitBuildTimeout 15
+MaxClientCircuitsPending 4
+KeepalivePeriod 45
+NewCircuitPeriod 60
+MaxCircuitDirtiness 600
+EOF
+      ;;
+  esac
 }
 
+# ---------------------------------------------------------------------------
+# Settings DB  id:port:bw:uptime:sticky
+# ---------------------------------------------------------------------------
 get_setting() {
-  local id=$1 field=$2
-  local line
+  local id=$1 field=$2 line
   line=$(grep "^${id}:" "$SETTINGS" 2>/dev/null | head -1 || true)
-  if [[ -n "$line" ]]; then
-    IFS=':' read -r _ port bw uptime sticky typ <<< "$line"
+  if [[ -n "${line:-}" ]]; then
+    IFS=':' read -r _ port bw uptime sticky <<< "$line"
     case "$field" in
       port)      echo "${port:-0}" ;;
       bandwidth) echo "${bw:-0}" ;;
       uptime)    echo "${uptime:-0}" ;;
       sticky)    echo "${sticky:-0}" ;;
-      type)      echo "${typ:-tor}" ;;
+      *)         echo 0 ;;
     esac
   else
-    echo "0"
+    echo 0
   fi
 }
 
 set_setting() {
   local id=$1 field=$2 value=$3
-  local line port bw uptime sticky typ
+  local line port=0 bw=0 uptime=0 sticky=0
   line=$(grep "^${id}:" "$SETTINGS" 2>/dev/null | head -1 || true)
-  if [[ -n "$line" ]]; then
-    IFS=':' read -r _ port bw uptime sticky typ <<< "$line"
-  else
-    if is_tor_id "$id"; then
-      IFS=':' read -r _ _ port <<< "${TOR_LOC[$id]}"
-      typ="tor"
-    else
-      IFS=':' read -r _ _ port <<< "${PSI_LOC[$id]}"
-      typ="psi"
-    fi
-    bw=0; uptime=0; sticky=0
+  if [[ -n "${line:-}" ]]; then
+    IFS=':' read -r _ port bw uptime sticky <<< "$line"
   fi
   case "$field" in
-    port)      port="$value" ;;
-    bandwidth) bw="$value" ;;
-    uptime)    uptime="$value" ;;
-    sticky)    sticky="$value" ;;
-    type)      typ="$value" ;;
+    port)      port=$value ;;
+    bandwidth) bw=$value ;;
+    uptime)    uptime=$value ;;
+    sticky)    sticky=$value ;;
   esac
   sed -i "/^${id}:/d" "$SETTINGS" 2>/dev/null || true
-  echo "${id}:${port}:${bw}:${uptime}:${sticky}:${typ}" >> "$SETTINGS"
+  echo "${id}:${port}:${bw}:${uptime}:${sticky}" >> "$SETTINGS"
 }
 
-migrate_settings() {
-  for id in "${TOR_ORDER[@]}"; do
-    grep -q "^${id}:" "$SETTINGS" 2>/dev/null && continue
-    IFS=':' read -r _ _ port <<< "${TOR_LOC[$id]}"
-    echo "${id}:${port}:0:0:0:tor" >> "$SETTINGS"
-  done
-  for id in "${PSI_ORDER[@]}"; do
-    grep -q "^${id}:" "$SETTINGS" 2>/dev/null && continue
-    IFS=':' read -r _ _ port <<< "${PSI_LOC[$id]}"
-    echo "${id}:${port}:0:0:0:psi" >> "$SETTINGS"
-  done
-}
-
-info() {
+# ---------------------------------------------------------------------------
+# Parse location info
+# ---------------------------------------------------------------------------
+parse_tor() {
   local id=$1
-  local code name port
-  if is_tor_id "$id"; then
-    IFS=':' read -r code name port <<< "${TOR_LOC[$id]}"
-  elif is_psi_id "$id"; then
-    IFS=':' read -r code name port <<< "${PSI_LOC[$id]}"
-  else
-    echo "??|Unknown|0"
-    return
-  fi
-  local custom
-  custom=$(get_setting "$id" "port")
-  [[ "$custom" != "0" && -n "$custom" ]] && port="$custom"
+  [[ -n ${TOR_LOC[$id]+x} ]] || return 1
+  local code name port custom
+  IFS=':' read -r code name port <<< "${TOR_LOC[$id]}"
+  custom=$(get_setting "$id" port)
+  [[ "$custom" != "0" && -n "$custom" ]] && port=$custom
   echo "${code}|${name}|${port}"
 }
 
+parse_psi() {
+  local id=$1
+  [[ -n ${PSI_LOC[$id]+x} ]] || return 1
+  local code name port custom
+  IFS=':' read -r code name port <<< "${PSI_LOC[$id]}"
+  custom=$(get_setting "$id" port)
+  [[ "$custom" != "0" && -n "$custom" ]] && port=$custom
+  echo "${code}|${name}|${port}"
+}
+
+resolve_id() {
+  # Accept t01, T01, 01 (tor), p01, P01
+  local raw=${1^^}
+  raw=${raw// /}
+  if [[ "$raw" =~ ^T[0-9]{2}$ ]]; then echo "$raw"; return 0; fi
+  if [[ "$raw" =~ ^P[0-9]{2}$ ]]; then echo "$raw"; return 0; fi
+  if [[ "$raw" =~ ^[0-9]{1,2}$ ]]; then printf 'T%02d' "$((10#$raw))"; return 0; fi
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Process detection
+# ---------------------------------------------------------------------------
 running_tor() {
   local code=$1 port=$2
-  pgrep -f "tor -f $CFG/node_${code}_${port}.conf" >/dev/null 2>&1
+  pgrep -f "tor -f ${CFG}/node_${code}_${port}\\.conf" >/dev/null 2>&1 \
+    || pgrep -f "tor -f ${CFG}/node_${code}_${port}.conf" >/dev/null 2>&1
 }
 
 running_psi() {
   local code=$1 port=$2
-  local pid=""
-  if [[ -f "$STA/psi_${code}_${port}.pid" ]]; then
-    pid=$(cat "$STA/psi_${code}_${port}.pid" 2>/dev/null || true)
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+  local pf="$STA/psi_${code}_${port}.pid"
+  if pgrep -f "psiphon-tunnel-core" >/dev/null 2>&1; then
+    if pgrep -f "psiphon-tunnel-core.*${port}" >/dev/null 2>&1; then
       return 0
     fi
+    # fallback: pid file + live process
+    if [[ -f "$pf" ]]; then
+      local pid; pid=$(cat "$pf" 2>/dev/null || true)
+      if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+        return 0
+      fi
+    fi
   fi
-  if pgrep -af psiphon-tunnel-core 2>/dev/null | grep -q "${port}"; then
-    return 0
+  if [[ -f "$pf" ]]; then
+    local pid; pid=$(cat "$pf" 2>/dev/null || true)
+    [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null && return 0
+  fi
+  # port open as last resort
+  if command -v ss >/dev/null 2>&1; then
+    ss -lntp 2>/dev/null | grep -q ":${port} " && pgrep -f psiphon-tunnel-core >/dev/null 2>&1 && return 0
   fi
   return 1
 }
 
-
-running() {
-  local id=$1
-  local code name port
-  IFS='|' read -r code name port <<< "$(info "$id")"
-  if is_tor_id "$id"; then
-    running_tor "$code" "$port"
-  else
-    running_psi "$code" "$port"
-  fi
+tor_pid() {
+  local code=$1 port=$2
+  pgrep -f "node_${code}_${port}.conf" 2>/dev/null | head -1 || true
 }
 
-get_pid() {
-  local id=$1
-  local code name port
-  IFS='|' read -r code name port <<< "$(info "$id")"
-  if is_tor_id "$id"; then
-    pgrep -f "node_${code}_${port}.conf" 2>/dev/null | head -1 || true
-  else
-    if [[ -f "$STA/psi_${code}_${port}.pid" ]]; then
-      cat "$STA/psi_${code}_${port}.pid" 2>/dev/null || true
-    else
-      pgrep -f "psiphon-tunnel-core" 2>/dev/null | head -1 || true
+psi_pid() {
+  local code=$1 port=$2
+  local pf="$STA/psi_${code}_${port}.pid"
+  if [[ -f "$pf" ]]; then
+    local pid; pid=$(cat "$pf" 2>/dev/null || true)
+    if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+      echo "$pid"
+      return
     fi
   fi
+  pgrep -f "psiphon-tunnel-core.*${port}" 2>/dev/null | head -1 || true
 }
 
-list_running() {
-  local out=()
-  for id in "${TOR_ORDER[@]}" "${PSI_ORDER[@]}"; do
-    running "$id" && out+=("$id")
-  done
-  echo "${out[*]}"
+node_cpu_mem() {
+  local pid=$1
+  [[ -z "${pid:-}" ]] && { echo "0.0 0.0"; return; }
+  ps -p "$pid" -o %cpu=,%mem= --no-headers 2>/dev/null \
+    | awk '{printf "%.1f %.1f", $1+0, $2+0}' || echo "0.0 0.0"
 }
 
-list_running_tor() {
-  local out=()
-  for id in "${TOR_ORDER[@]}"; do
-    running "$id" && out+=("$id")
-  done
-  echo "${out[*]}"
-}
-
-list_running_psi() {
-  local out=()
-  for id in "${PSI_ORDER[@]}"; do
-    running "$id" && out+=("$id")
-  done
-  echo "${out[*]}"
-}
-
-get_stats() {
-  local cpu=0 mem=0 cnt=0
-  local pids
-  pids=$(pgrep -f "node_.*\.conf|psiphon-tunnel-core" 2>/dev/null || true)
-  if [[ -n "$pids" ]]; then
-    while read -r pid; do
-      [[ -z "$pid" ]] && continue
-      local c m
-      read -r c m <<< "$(ps -p "$pid" -o %cpu=,%mem= --no-headers 2>/dev/null || echo "0 0")"
-      cpu=$(awk -v a="$cpu" -v b="${c:-0}" 'BEGIN{printf "%.1f",a+b}')
-      mem=$(awk -v a="$mem" -v b="${m:-0}" 'BEGIN{printf "%.1f",a+b}')
-      cnt=$((cnt+1))
-    done <<< "$pids"
-  fi
+global_stats() {
+  local cpu=0 mem=0 cnt=0 p
+  while read -r p; do
+    [[ -z "$p" ]] && continue
+    local c m
+    read -r c m <<< "$(node_cpu_mem "$p")"
+    cpu=$(awk -v a="$cpu" -v b="${c:-0}" 'BEGIN{printf "%.1f", a+b}')
+    mem=$(awk -v a="$mem" -v b="${m:-0}" 'BEGIN{printf "%.1f", a+b}')
+    cnt=$((cnt + 1))
+  done < <( {
+      pgrep -f "tor -f ${CFG}/node_" 2>/dev/null || true
+      pgrep -f "psiphon-tunnel-core" 2>/dev/null || true
+    } )
   printf "%.1f %.1f %d" "$cpu" "$mem" "$cnt"
 }
 
-get_node_stats() {
-  local pid=$1
-  [[ -z "$pid" ]] && { echo "0.0 0.0"; return; }
-  ps -p "$pid" -o %cpu=,%mem= --no-headers 2>/dev/null || echo "0.0 0.0"
-}
-
-check_bootstrap() {
-  local logfile=$1 port=$2 typ=${3:-tor}
-  if nc -z 127.0.0.1 "$port" 2>/dev/null; then
-    echo "Active"
-    return
-  fi
-  if [[ "$typ" == "tor" ]]; then
-    if grep -q "Bootstrapped 100%" "$logfile" 2>/dev/null; then
-      echo "Active"
-    elif grep -q "Bootstrapped" "$logfile" 2>/dev/null; then
-      echo "Connecting"
-    else
-      echo "Inactive"
-    fi
-  else
-    if grep -qE "Tunnels|ListeningSocksProxyPort|Connected|established" "$logfile" 2>/dev/null; then
-      echo "Active"
-    elif [[ -s "$logfile" ]]; then
-      echo "Connecting"
-    else
-      echo "Inactive"
-    fi
-  fi
-}
-
-get_ip() {
-  local port=$1 code=$2
-  local ip_file="$STA/${code}_${port}.ip"
-  if [[ -f "$ip_file" ]] && [[ $(find "$ip_file" -mmin -20 2>/dev/null) ]]; then
-    cat "$ip_file"
-    return
-  fi
-  local ip
-  ip=$(curl --socks5-hostname "127.0.0.1:$port" -s --max-time 5 \
-       https://api.ipify.org 2>/dev/null || echo "?")
-  echo "$ip" > "$ip_file"
-  echo "$ip"
-}
-
 format_uptime() {
-  local start=$1
+  local start=${1:-0}
   [[ "$start" == "0" || -z "$start" ]] && { echo "--"; return; }
   local now diff
   now=$(date +%s)
@@ -388,84 +383,24 @@ format_uptime() {
   fi
 }
 
-line()  { echo -e "${D}──────────────────────────────────────────────────────────────${N}"; }
-line2() { echo -e "${D}══════════════════════════════════════════════════════════════${N}"; }
-
-get_perf_params() {
-  case "$PERF_MODE" in
-    weak)
-      echo "MaxMemInQueues 16 MB
-NumEntryGuards 1
-CircuitBuildTimeout 20
-MaxClientCircuitsPending 2
-KeepalivePeriod 60
-NewCircuitPeriod 90
-MaxCircuitDirtiness 900
-NumCPUs 1"
-      ;;
-    max)
-      echo "MaxMemInQueues 64 MB
-NumEntryGuards 3
-CircuitBuildTimeout 12
-MaxClientCircuitsPending 8
-KeepalivePeriod 30
-NewCircuitPeriod 40
-MaxCircuitDirtiness 400
-NumCPUs 0"
-      ;;
-    *)
-      echo "MaxMemInQueues 32 MB
-NumEntryGuards 2
-CircuitBuildTimeout 15
-MaxClientCircuitsPending 4
-KeepalivePeriod 45
-NewCircuitPeriod 60
-MaxCircuitDirtiness 600
-NumCPUs 1"
-      ;;
-  esac
-}
-
-# Header is ONLY for interactive menu – NEVER used in install
-header() {
-  clear
-  load_global
-  local cpu mem cnt
-  read -r cpu mem cnt <<< "$(get_stats)"
-  local mode_col
-  case "$PERF_MODE" in
-    weak)   mode_col="${LG}WEAK${N}" ;;
-    max)    mode_col="${LR}MAX${N}" ;;
-    *)      mode_col="${CY}NORMAL${N}" ;;
-  esac
-  echo
-  echo -e "  ${LB}████${N}  ${W}tor-ml${N}  ${PK}v${VERSION}${N}  ${D}• Multi Tor + Psiphon Manager${N}"
-  line2
-  echo -e "  ${G}●${N} Running  ${W}${cnt}${N}   ${D}|${N}  CPU ${OR}${cpu}%${N}   ${D}|${N}  MEM ${OR}${mem}%${N}   ${D}|${N}  Mode ${mode_col}"
-  echo -e "  ${C}●${N} Config   ${D}$BASE${N}"
-  echo -e "  ${M}●${N} Auto     ${W}${AUTO_PORT}${N}  ${D}(best-ping / balancer)${N}"
-  line
-  echo -e "  ${D}Optimized for low-end VPS  •  modern UI  •  Tor + Psiphon${N}"
-  line
-  echo
-}
-
+# ---------------------------------------------------------------------------
+# Config writers
+# ---------------------------------------------------------------------------
 write_tor_conf() {
   local code=$1 port=$2 dir=$3 logfile=$4 bw=$5 sticky=$6
-  local perf_extra
-  perf_extra=$(get_perf_params)
+  local extra
+  extra=$(perf_tor_extra)
   cat > "$CFG/node_${code}_${port}.conf" <<EOF
-# tor-ml v${VERSION} – ${PERF_MODE} profile
-SocksPort 127.0.0.1:$port IsolateDestAddr IsolateDestPort
-DataDirectory $dir
-ExitNodes {$code}
+# tor-ml ${VERSION} – generated $(date -u +%Y-%m-%dT%H:%M:%SZ)
+SocksPort 127.0.0.1:${port} IsolateDestAddr IsolateDestPort
+DataDirectory ${dir}
+ExitNodes {${code}}
 StrictNodes 1
 ClientOnly 1
 RunAsDaemon 1
-Log notice file $logfile
-
+Log notice file ${logfile}
 AvoidDiskWrites 1
-$perf_extra
+${extra}
 LearnCircuitBuildTimeout 0
 DisableDebuggerAttachment 1
 DirReqStatistics 0
@@ -477,1018 +412,873 @@ CellStatistics 0
 ClientUseIPv6 0
 SocksPolicy accept 127.0.0.1
 SocksPolicy reject *
-
-$([[ "$sticky" == "1" ]] && echo "EnforceDistinctSubnets 0")
+$([[ "${sticky}" == "1" ]] && echo "EnforceDistinctSubnets 0")
 EOF
-  if [[ "$bw" != "0" && -n "$bw" ]]; then
-    cat >> "$CFG/node_${code}_${port}.conf" <<EOF
-BandwidthRate ${bw} MB
-BandwidthBurst $((bw * 2)) MB
-EOF
+  if [[ "${bw}" != "0" && -n "${bw}" ]]; then
+    {
+      echo "BandwidthRate ${bw} MB"
+      echo "BandwidthBurst $((bw * 2)) MB"
+    } >> "$CFG/node_${code}_${port}.conf"
   fi
   chown debian-tor:debian-tor "$CFG/node_${code}_${port}.conf" 2>/dev/null || true
   chmod 600 "$CFG/node_${code}_${port}.conf" 2>/dev/null || true
 }
 
-ensure_psiphon_binary() {
-  local bin="$BIN/psiphon-tunnel-core"
-  if [[ -x "$bin" ]]; then
-    return 0
-  fi
-  echo -e "  ${Y}↓ Downloading psiphon-tunnel-core ...${N}"
-  local arch url
-  arch=$(uname -m)
-  case "$arch" in
-    x86_64|amd64)
-      url="https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core-binaries/master/linux/psiphon-tunnel-core-x86_64"
-      ;;
-    aarch64|arm64)
-      echo -e "  ${R}Official Psiphon binary for ARM64 is not published by Psiphon-Labs.${N}"
-      echo -e "  ${D}Psiphon locations will not work on this architecture.${N}"
-      echo -e "  ${D}Tor locations work normally.${N}"
-      return 1
-      ;;
-    *)
-      echo -e "  ${R}Unsupported architecture: $arch${N}"
-      return 1
-      ;;
-  esac
-  if ! curl -fsSL --retry 3 --connect-timeout 15 -o "$bin" "$url"; then
-    echo -e "  ${R}Failed to download Psiphon binary${N}"
-    rm -f "$bin"
-    return 1
-  fi
-  chmod +x "$bin"
-  if ! file "$bin" 2>/dev/null | grep -q "executable"; then
-    echo -e "  ${R}Downloaded file is not a valid binary${N}"
-    rm -f "$bin"
-    return 1
-  fi
-  echo -e "  ${G}✓ Psiphon binary ready${N}"
-}
-
 write_psi_conf() {
   local code=$1 port=$2 dir=$3
-  local http_port=$((port + 1000))
+  local http=$((port + 1000))
+  # Official-style config fields used by current tunnel-core
   cat > "$CFG/psi_${code}_${port}.json" <<EOF
 {
-  "LocalSocksProxyPort": $port,
-  "LocalHttpProxyPort": $http_port,
-  "EgressRegion": "$code",
+  "LocalSocksProxyPort": ${port},
+  "LocalHttpProxyPort": ${http},
+  "EgressRegion": "${code}",
   "PropagationChannelId": "FFFFFFFFFFFFFFFF",
   "SponsorId": "FFFFFFFFFFFFFFFF",
-  "ClientPlatform": "Linux",
-  "ClientVersion": "1",
-  "DataRootDirectory": "$dir",
+  "DataRootDirectory": "${dir}",
   "UseIndistinguishableTLS": true,
   "EmitDiagnosticNotices": true,
-  "EmitBytesTransferred": false,
-  "RemoteServerListDownloadFilename": "remote_server_list",
-  "RemoteServerListSignaturePublicKey": "MIICIDANBgkqhkiG9w0BAQEFAAOCAg0AMIICCAKCAgEAt7Ls+/39r+T6zNW7GiVpJfzq/xvL9SBH5rIFnk0RXYEYavax3WS6HOD35eTAqn8AniOwiH+DOkvgSKF2caqk/y1dfq47Pdymtwzp9ikpB1C5OfAysXzBiwVJlCdajBKvBZDerV1cMvRzCKvKwRmvDmHgphQQ7WfXIGbRbmmk6opMBh3roE42KcotLFtqp0RRwLtcBRNtCdsrVsjiI1Lqz/lH+T61sGjSjQ3CHMuZYSQJZo/KrvzgQXpkaCTdbObxHqb6/+i1qaVOfEsvjoiyzTxJADvSytVtcTjijhPEV6XskJVHE1Zgl+7rATr/pDQkw6DPCNBS1+Y6fy7GstZALQXwEDN/qhQI9kWkHijT8ns+i1vGg00Mk/6J75arLhqcodWsdeG/M/moWgqQAnlZAGVtJI1OgeF5fsPpXu4kctOfuZlGjVZXQNW34aOzm8r8S0eVZitPlbhcPiR4gT/aSMz/wd8lZlzZYsje/Jr8u/YtlwjjreZrGRmG8KMOzukV3lLmMppXFMvl4bxv6YFEmIuTsOhbLTwFgh7KYNjodLj/LsqRVfwz31PgWQFTEPICV7GCvgVlPRxnofqKSjgTWI4mxDhBpVcATvaoBl1L/6WLbFvBsoAUBItWwctO2xalKxF5szhGm8lccoc5MZr8kfE0uxMgsxz4er68iCID+rsCAQM=",
-  "RemoteServerListUrl": "https://s3.amazonaws.com//psiphon/web/mjr4-p23r-puwl/server_list_compressed",
+  "ClientPlatform": "Linux",
+  "DisableLocalSocksAuth": true,
+  "DisableLocalHTTPProxy": false,
+  "EstablishTunnelTimeoutSeconds": 120,
+  "TunnelPoolSize": 2,
+  "ConnectionWorkerPoolSize": 10,
   "RemoteServerListURLs": [
     {
-      "URL": "https://s3.amazonaws.com//psiphon/web/mjr4-p23r-puwl/server_list_compressed",
-      "OnlyAfterAttempts": 0
+      "URL": "https://s3.amazonaws.com/psiphon/web/mjr4-p23r-puwl/server_list_compressed",
+      "SkipVerify": false
     }
-  ]
+  ],
+  "RemoteServerListDownloadFilename": "remote_server_list",
+  "RemoteServerListSignaturePublicKey": "MIICIDANBgkqhkiG9w0BAQEFAAOCAg0AMIICCAKCAgEAt7Ls+/39r+T6zNW7GiVpJfzq/xvL9SBH5rIFnk0RXYEYavax3WS6HOD35eTAqn8AniOwiH+DOkvgSKF2caqk/y1dfq47Pdymtwzp9ikpB1C5OfAysXzBiwVJlCdajBKvBZDerV1cMvRzCKvKwRmvDmHgphQQ7WfXIGbRbmmk6opMBh3roE42KcotLFtqp0RRwLtcBRNtCdsrVsjiI1Lqz/lH+T61sGjSjQ3CHMuZYSQJZo/KrvzgQXpkaCTdbObxHqb6/+i1qaVOfEsvjoiyzTxJADvSytVtcTjijhPEV6XskJVHE1Zgl+7rATr/pDQkw6DPCNBS1+Y6fy7GstZALQXwEDN/qhQI9kWkHijT8ns+i1vGg00Mk/6J75arLhqcodWsdeG/M/moWgqQAnlZAGVtJI1OgeF5fsPpXu4kctOfuZlGjVZXQNW34aOzm8r8S0eVZitPlbhcPiR4gT/aSMz/wd8lZlzZYsje/Jr8u/YtlwjjreZrGRmG8KMOzukV3lLmMppXFMvl4bxv6YFEmIuTsOhbLTwFgh7KYNjodUeWEDu5YOV0oJj1uRvvRAsGLQmRQ2SX9SJarUX+8pUWw4T2cOIyGSF91klRM0fU70jN4NVrrJrVNi+NizAsXZ4mY5g8xW2R+k8x6ZQCEBQAwEAAQ=="
 }
 EOF
 }
 
-start_one() {
+# ---------------------------------------------------------------------------
+# Start / Stop single
+# ---------------------------------------------------------------------------
+start_tor_one() {
   local id=$1
   local code name port
-  IFS='|' read -r code name port <<< "$(info "$id")"
+  IFS='|' read -r code name port <<< "$(parse_tor "$id")" || { echo -e "  ${R}✗${N} bad Tor id $id"; return 1; }
+  local conf="$CFG/node_${code}_${port}.conf"
+  local dir="$DAT/${code}_${port}"
+  local logfile="$LOG/${code}_${port}.log"
   local bw sticky
-  bw=$(get_setting "$id" "bandwidth")
-  sticky=$(get_setting "$id" "sticky")
+  bw=$(get_setting "$id" bandwidth)
+  sticky=$(get_setting "$id" sticky)
 
-  if is_tor_id "$id"; then
-    local conf="$CFG/node_${code}_${port}.conf"
-    local dir="$DAT/tor_${code}_${port}"
-    local logfile="$LOG/tor_${code}_${port}.log"
-    mkdir -p "$dir" "$LOG"
-    chown -R debian-tor:debian-tor "$dir" 2>/dev/null || true
-    chmod 700 "$dir" 2>/dev/null || true
-    write_tor_conf "$code" "$port" "$dir" "$logfile" "$bw" "$sticky"
-    if running_tor "$code" "$port"; then
-      echo -e "  ${Y}•${N} $name [${code}] (Tor) already running on $port"
-      return 0
-    fi
-    pkill -f "node_${code}_${port}.conf" 2>/dev/null || true
-    sleep 0.15
-    : > "$logfile"
-    chown debian-tor:debian-tor "$logfile" 2>/dev/null || true
-    if ! sudo -u debian-tor /usr/bin/tor -f "$conf" >/dev/null 2>&1; then
-      echo -e "  ${R}✗${N} $name [${code}] Tor failed to start"
-      [[ -s "$logfile" ]] && tail -n 4 "$logfile" | sed 's/^/    /'
-      return 1
-    fi
-    local i=0
-    while ! running_tor "$code" "$port" && (( i < 15 )); do
-      sleep 0.3
-      i=$((i+1))
-    done
-    if running_tor "$code" "$port"; then
-      set_setting "$id" "uptime" "$(date +%s)"
-      local pid
-      pid=$(get_pid "$id")
-      if [[ -n "$pid" ]]; then
-        case "$PERF_MODE" in
-          weak) renice 10 -p "$pid" >/dev/null 2>&1 || true ;;
-          max)  renice -5 -p "$pid" >/dev/null 2>&1 || true ;;
-        esac
-      fi
-      echo -e "  ${G}✓${N} $name [${code}] ${C}Tor${N} started on ${W}$port${N}"
-      return 0
-    fi
-    echo -e "  ${R}✗${N} $name [${code}] Tor failed"
+  mkdir -p "$dir" "$LOG"
+  chown -R debian-tor:debian-tor "$dir" 2>/dev/null || true
+  chmod 700 "$dir" 2>/dev/null || true
+  write_tor_conf "$code" "$port" "$dir" "$logfile" "$bw" "$sticky"
+
+  if running_tor "$code" "$port"; then
+    echo -e "  ${Y}•${N} Tor ${name} [${code}] already running on ${port}"
+    return 0
+  fi
+
+  pkill -f "node_${code}_${port}.conf" 2>/dev/null || true
+  sleep 0.2
+  : > "$logfile"
+  chown debian-tor:debian-tor "$logfile" 2>/dev/null || true
+
+  if ! sudo -u debian-tor /usr/bin/tor -f "$conf" >/dev/null 2>&1; then
+    echo -e "  ${R}✗${N} Tor ${name} failed to start"
     [[ -s "$logfile" ]] && tail -n 5 "$logfile" | sed 's/^/    /'
     return 1
-  else
-    ensure_psiphon_binary || return 1
-    local dir="$DAT/psi_${code}_${port}"
-    local logfile="$LOG/psi_${code}_${port}.log"
-    local conf="$CFG/psi_${code}_${port}.json"
-    mkdir -p "$dir" "$LOG"
-    write_psi_conf "$code" "$port" "$dir"
-    if running_psi "$code" "$port"; then
-      echo -e "  ${Y}•${N} $name [${code}] (Psiphon) already running on $port"
-      return 0
-    fi
-    if [[ -f "$STA/psi_${code}_${port}.pid" ]]; then
-      kill "$(cat "$STA/psi_${code}_${port}.pid" 2>/dev/null)" 2>/dev/null || true
-      rm -f "$STA/psi_${code}_${port}.pid"
-    fi
-    pkill -f "psiphon-tunnel-core.*${port}" 2>/dev/null || true
-    sleep 0.2
-    : > "$logfile"
-    nohup "$BIN/psiphon-tunnel-core" -config "$conf" >> "$logfile" 2>&1 &
-    local pid=$!
-    echo "$pid" > "$STA/psi_${code}_${port}.pid"
-    local i=0
-    while ! nc -z 127.0.0.1 "$port" 2>/dev/null && (( i < 40 )); do
-      sleep 0.5
-      i=$((i+1))
-      kill -0 "$pid" 2>/dev/null || break
-    done
-    if nc -z 127.0.0.1 "$port" 2>/dev/null; then
-      set_setting "$id" "uptime" "$(date +%s)"
-      echo -e "  ${G}✓${N} $name [${code}] ${PK}Psiphon${N} started on ${W}$port${N}"
-      return 0
-    fi
-    echo -e "  ${R}✗${N} $name [${code}] Psiphon failed / still connecting"
-    [[ -s "$logfile" ]] && tail -n 8 "$logfile" | sed 's/^/    /'
+  fi
+
+  local i=0
+  while ! running_tor "$code" "$port" && (( i < 20 )); do
+    sleep 0.25
+    i=$((i + 1))
+  done
+
+  if running_tor "$code" "$port"; then
+    set_setting "$id" uptime "$(date +%s)"
+    echo -e "  ${G}✓${N} Tor ${W}${name}${N} [${code}] → SOCKS ${W}${port}${N}"
+    return 0
+  fi
+  echo -e "  ${R}✗${N} Tor ${name} start timeout"
+  [[ -s "$logfile" ]] && tail -n 6 "$logfile" | sed 's/^/    /'
+  return 1
+}
+
+stop_tor_one() {
+  local id=$1
+  local code name port
+  IFS='|' read -r code name port <<< "$(parse_tor "$id")" || return 1
+  if ! running_tor "$code" "$port"; then
+    echo -e "  ${Y}•${N} Tor ${name} not running"
+    set_setting "$id" uptime 0
+    return 0
+  fi
+  pkill -f "node_${code}_${port}.conf" 2>/dev/null || true
+  sleep 0.25
+  if running_tor "$code" "$port"; then
+    pkill -9 -f "node_${code}_${port}.conf" 2>/dev/null || true
+  fi
+  set_setting "$id" uptime 0
+  rm -f "$STA/${code}_${port}.ip"
+  echo -e "  ${G}✓${N} Tor ${name} stopped"
+}
+
+start_psi_one() {
+  local id=$1
+  if [[ ! -x "$PSI_BIN" ]]; then
+    echo -e "  ${R}✗${N} Psiphon binary missing at $PSI_BIN"
+    echo -e "    Re-run install or download manually."
     return 1
   fi
+  local code name port
+  IFS='|' read -r code name port <<< "$(parse_psi "$id")" || { echo -e "  ${R}✗${N} bad Psi id $id"; return 1; }
+  local dir="$DAT/psi_${code}_${port}"
+  local conf="$CFG/psi_${code}_${port}.json"
+  local logfile="$LOG/psi_${code}_${port}.log"
+  local pf="$STA/psi_${code}_${port}.pid"
+
+  mkdir -p "$dir" "$LOG"
+  write_psi_conf "$code" "$port" "$dir"
+
+  if running_psi "$code" "$port"; then
+    echo -e "  ${Y}•${N} Psi ${name} [${code}] already running on ${port}"
+    return 0
+  fi
+
+  # cleanup stale
+  if [[ -f "$pf" ]]; then
+    kill "$(cat "$pf")" 2>/dev/null || true
+    rm -f "$pf"
+  fi
+  pkill -f "psiphon-tunnel-core.*${port}" 2>/dev/null || true
+  sleep 0.2
+  : > "$logfile"
+
+  nohup "$PSI_BIN" -config "$conf" >>"$logfile" 2>&1 &
+  local pid=$!
+  echo "$pid" > "$pf"
+
+  local i=0
+  while ! running_psi "$code" "$port" && (( i < 30 )); do
+    sleep 0.3
+    i=$((i + 1))
+    # process died?
+    if ! kill -0 "$pid" 2>/dev/null; then
+      break
+    fi
+  done
+
+  if running_psi "$code" "$port"; then
+    set_setting "$id" uptime "$(date +%s)"
+    echo -e "  ${G}✓${N} Psi ${W}${name}${N} [${code}] → SOCKS ${W}${port}${N}"
+    return 0
+  fi
+  echo -e "  ${R}✗${N} Psi ${name} failed (check log)"
+  [[ -s "$logfile" ]] && tail -n 8 "$logfile" | sed 's/^/    /'
+  return 1
+}
+
+stop_psi_one() {
+  local id=$1
+  local code name port
+  IFS='|' read -r code name port <<< "$(parse_psi "$id")" || return 1
+  local pf="$STA/psi_${code}_${port}.pid"
+  if [[ -f "$pf" ]]; then
+    local pid; pid=$(cat "$pf" 2>/dev/null || true)
+    [[ -n "${pid:-}" ]] && kill "$pid" 2>/dev/null || true
+    sleep 0.2
+    [[ -n "${pid:-}" ]] && kill -9 "$pid" 2>/dev/null || true
+    rm -f "$pf"
+  fi
+  pkill -f "psiphon-tunnel-core.*${port}" 2>/dev/null || true
+  set_setting "$id" uptime 0
+  echo -e "  ${G}✓${N} Psi ${name} stopped"
+}
+
+start_one() {
+  local id
+  id=$(resolve_id "$1") || { echo -e "  ${R}✗${N} unknown id $1"; return 1; }
+  case "$id" in
+    T*) start_tor_one "$id" ;;
+    P*) start_psi_one "$id" ;;
+  esac
 }
 
 stop_one() {
-  local id=$1
-  local code name port
-  IFS='|' read -r code name port <<< "$(info "$id")"
-  if ! running "$id"; then
-    echo -e "  ${Y}•${N} $name [${code}] not running"
-    return 0
-  fi
-  if is_tor_id "$id"; then
-    pkill -f "node_${code}_${port}.conf" 2>/dev/null || true
-    sleep 0.25
-    if running_tor "$code" "$port"; then
-      pkill -9 -f "node_${code}_${port}.conf" 2>/dev/null || true
-    fi
-  else
-    if [[ -f "$STA/psi_${code}_${port}.pid" ]]; then
-      kill "$(cat "$STA/psi_${code}_${port}.pid")" 2>/dev/null || true
-      sleep 0.3
-      kill -9 "$(cat "$STA/psi_${code}_${port}.pid")" 2>/dev/null || true
-      rm -f "$STA/psi_${code}_${port}.pid"
-    fi
-    pkill -f "psiphon-tunnel-core" 2>/dev/null || true
-    sleep 0.1
-  fi
-  set_setting "$id" "uptime" "0"
-  rm -f "$STA/${code}_${port}.ip" 2>/dev/null || true
-  echo -e "  ${G}✓${N} $name [${code}] stopped"
+  local id
+  id=$(resolve_id "$1") || { echo -e "  ${R}✗${N} unknown id $1"; return 1; }
+  case "$id" in
+    T*) stop_tor_one "$id" ;;
+    P*) stop_psi_one "$id" ;;
+  esac
 }
 
-auto_start() {
-  if [[ -f "$AUTO_PID_FILE" ]] && kill -0 "$(cat "$AUTO_PID_FILE" 2>/dev/null)" 2>/dev/null; then
-    echo -e "  ${Y}•${N} Auto balancer already running"
-    return
-  fi
-  (
-    local last_port=""
-    while true; do
-      local best_port="" best_lat=99999 best_id=""
-      local ids
-      ids=$(list_running)
-      for id in $ids; do
-        local code name port
-        IFS='|' read -r code name port <<< "$(info "$id")"
-        local lat
-        lat=$(curl --socks5-hostname "127.0.0.1:$port" -o /dev/null -s -w "%{time_total}" \
-              --max-time 3 "https://www.cloudflare.com/cdn-cgi/trace" 2>/dev/null || echo "9")
-        lat=$(awk -v t="$lat" 'BEGIN{printf "%.0f", t*1000}')
-        if (( lat < best_lat )); then
-          best_lat=$lat
-          best_port=$port
-          best_id=$id
-        fi
-      done
-      if [[ -n "$best_port" ]]; then
-        echo "$best_port" > "$STA/best.port"
-        echo "$best_id" > "$STA/best.id"
-        if [[ "$best_port" != "$last_port" ]]; then
-          pkill -f "socat.*TCP-LISTEN:$AUTO_PORT" 2>/dev/null || true
-          sleep 0.15
-          socat TCP-LISTEN:$AUTO_PORT,fork,reuseaddr,bind=127.0.0.1 TCP:127.0.0.1:$best_port >/dev/null 2>&1 &
-          echo $! > "$STA/socat.pid"
-          last_port="$best_port"
-        fi
-      fi
-      sleep 40
-    done
-  ) &
-  echo $! > "$AUTO_PID_FILE"
-  echo -e "  ${G}✓${N} Auto balancer started on port ${W}$AUTO_PORT${N}"
-  echo -e "  ${D}  mixes Tor + Psiphon, picks lowest latency (no flicker when same)${N}"
+start_all_tor() {
+  local id
+  echo -e "  ${C}Starting all Tor locations...${N}"
+  for id in "${TOR_ORDER[@]}"; do
+    start_tor_one "$id" || true
+  done
+}
+
+start_all_psi() {
+  local id
+  echo -e "  ${C}Starting all Psiphon locations...${N}"
+  for id in "${PSI_ORDER[@]}"; do
+    start_psi_one "$id" || true
+  done
+}
+
+stop_all() {
+  local id
+  echo -e "  ${Y}Stopping everything...${N}"
+  for id in "${TOR_ORDER[@]}"; do stop_tor_one "$id" || true; done
+  for id in "${PSI_ORDER[@]}"; do stop_psi_one "$id" || true; done
+  auto_stop || true
+}
+
+# ---------------------------------------------------------------------------
+# Balancer
+# ---------------------------------------------------------------------------
+balancer_active() {
+  [[ -f "$AUTO_PID_FILE" ]] || return 1
+  local pid; pid=$(cat "$AUTO_PID_FILE" 2>/dev/null || true)
+  [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null
 }
 
 auto_stop() {
   if [[ -f "$AUTO_PID_FILE" ]]; then
     kill "$(cat "$AUTO_PID_FILE")" 2>/dev/null || true
-    [[ -f "$STA/socat.pid" ]] && kill "$(cat "$STA/socat.pid")" 2>/dev/null || true
-    pkill -f "socat.*$AUTO_PORT" 2>/dev/null || true
-    rm -f "$AUTO_PID_FILE" "$STA/best.port" "$STA/best.id" "$STA/socat.pid"
-    echo -e "  ${G}✓${N} Auto balancer stopped"
-  else
-    echo -e "  ${Y}•${N} Auto not running"
+    sleep 0.2
+    kill -9 "$(cat "$AUTO_PID_FILE")" 2>/dev/null || true
+    rm -f "$AUTO_PID_FILE"
   fi
+  pkill -f "socat TCP-LISTEN:${AUTO_PORT}" 2>/dev/null || true
+  rm -f "$AUTO_TARGET_FILE"
+  echo -e "  ${G}✓${N} Balancer stopped"
 }
 
-show_running_table() {
-  local ids
-  ids=$(list_running)
-  if [[ -z "$ids" ]]; then
-    echo -e "  ${Y}No running locations.${N}"
+pick_best_port() {
+  local best_port="" best_ms=999999 id code name port ms
+  for id in "${TOR_ORDER[@]}"; do
+    IFS='|' read -r code name port <<< "$(parse_tor "$id")"
+    running_tor "$code" "$port" || continue
+    ms=$(curl --socks5-hostname "127.0.0.1:${port}" -o /dev/null -s -w "%{time_total}" --max-time 5 \
+      https://1.1.1.1/cdn-cgi/trace 2>/dev/null || echo 99)
+    ms=$(awk -v t="$ms" 'BEGIN{printf "%d", (t+0)*1000}')
+    if (( ms > 0 && ms < best_ms )); then
+      best_ms=$ms
+      best_port=$port
+    fi
+  done
+  for id in "${PSI_ORDER[@]}"; do
+    IFS='|' read -r code name port <<< "$(parse_psi "$id")"
+    running_psi "$code" "$port" || continue
+    ms=$(curl --socks5-hostname "127.0.0.1:${port}" -o /dev/null -s -w "%{time_total}" --max-time 5 \
+      https://1.1.1.1/cdn-cgi/trace 2>/dev/null || echo 99)
+    ms=$(awk -v t="$ms" 'BEGIN{printf "%d", (t+0)*1000}')
+    if (( ms > 0 && ms < best_ms )); then
+      best_ms=$ms
+      best_port=$port
+    fi
+  done
+  echo "${best_port}"
+}
+
+auto_start() {
+  command -v socat >/dev/null 2>&1 || { echo -e "  ${R}✗${N} socat not installed"; return 1; }
+  auto_stop >/dev/null 2>&1 || true
+  local target
+  target=$(pick_best_port)
+  if [[ -z "${target}" ]]; then
+    echo -e "  ${R}✗${N} No running Tor/Psiphon instance – start some locations first"
     return 1
   fi
-  echo -e "  ${C}ID    Type   CC   Location                 Port${N}"
-  line
-  for id in $ids; do
-    local code name port typ
-    IFS='|' read -r code name port <<< "$(info "$id")"
-    if is_tor_id "$id"; then typ="${C}Tor${N}"; else typ="${PK}Psi${N}"; fi
-    printf "  ${G}%-5s${N} %-12b %-4s %-24s ${W}%s${N}\n" "$id" "$typ" "$code" "$name" "$port"
-  done
-  line
-  return 0
+  nohup socat TCP-LISTEN:${AUTO_PORT},fork,reuseaddr,bind=127.0.0.1 TCP:127.0.0.1:${target} >/dev/null 2>&1 &
+  echo $! > "$AUTO_PID_FILE"
+  echo "$target" > "$AUTO_TARGET_FILE"
+  echo -e "  ${G}✓${N} Balancer listening ${W}:${AUTO_PORT}${N} → backend ${W}:${target}${N}"
 }
 
-full_status() {
-  header
-  echo -e "  ${C}ID    Type   CC   Location                 Port     CPU   MEM   Status     Uptime       IP${N}"
-  line
-  for id in "${TOR_ORDER[@]}" "${PSI_ORDER[@]}"; do
-    local code name port
-    IFS='|' read -r code name port <<< "$(info "$id")"
-    local typ_col
-    if is_tor_id "$id"; then typ_col="${C}Tor${N}"; else typ_col="${PK}Psi${N}"; fi
-    local pid
-    pid=$(get_pid "$id")
-    if running "$id"; then
-      local cpu mem boot_status ip uptime_display
-      read -r cpu mem <<< "$(get_node_stats "$pid")"
-      local typ="tor"
-      is_psi_id "$id" && typ="psi"
-      boot_status=$(check_bootstrap "$LOG/${typ}_${code}_${port}.log" "$port" "$typ")
-      ip=$(get_ip "$port" "$code")
-      uptime_display=$(format_uptime "$(get_setting "$id" "uptime")")
-      local col
-      case "$boot_status" in
-        Active)     col="$G" ;;
-        Connecting) col="$Y" ;;
-        *)          col="$R" ;;
-      esac
-      printf "  ${G}%-5s${N} %-12b %-4s %-24s %-8s ${G}%-5s${N} ${G}%-5s${N}  ${col}%-10s${N}  ${W}%-12s${N}  ${W}%s${N}\n" \
-        "$id" "$typ_col" "$code" "$name" "$port" "$cpu%" "$mem%" "$boot_status" "$uptime_display" "$ip"
-    else
-      printf "  ${D}%-5s %-12b %-4s %-24s %-8s${N} ${R}OFFLINE${N}\n" "$id" "$typ_col" "$code" "$name" "$port"
-    fi
-  done
-  line
-  if [[ -f "$STA/best.port" ]]; then
-    echo -e "  ${M}Auto best${N} → port ${W}$(cat "$STA/best.port")${N}  (public ${W}$AUTO_PORT${N})"
+# ---------------------------------------------------------------------------
+# JSON status for web panel (must list ALL locations)
+# ---------------------------------------------------------------------------
+json_escape() {
+  python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()[:-1] if False else sys.argv[1]))' "$1" 2>/dev/null \
+    || echo "\"$1\""
+}
+
+json_status() {
+  init_dirs
+  local cpu mem cnt mode
+  read -r cpu mem cnt <<< "$(global_stats)"
+  mode=$(load_perf)
+  local bal=false bport=$AUTO_PORT btarget=""
+  if balancer_active; then
+    bal=true
+    btarget=$(cat "$AUTO_TARGET_FILE" 2>/dev/null || echo "")
   fi
-  echo
-  read -rp "  Press Enter..."
-}
 
-do_start() {
-  header
-  echo -e "  ${C}Start Location(s)${N}"
-  echo
-  echo -e "  ${LB}── Tor ──${N}"
-  for i in {1..30}; do
-    local a b na nb
-    a=$(printf "%02d" "$i")
-    b=$(printf "%02d" "$((i+30))")
-    IFS='|' read -r _ na _ <<< "$(info "$a")"
-    IFS='|' read -r _ nb _ <<< "$(info "$b")"
-    printf "  ${C}[%s]${N} %-18s  ${C}[%s]${N} %-18s\n" "$a" "$na" "$b" "$nb"
-  done
-  echo
-  echo -e "  ${PK}── Psiphon ──${N}"
-  local c=0
-  for id in "${PSI_ORDER[@]}"; do
-    local code name port
-    IFS='|' read -r code name port <<< "$(info "$id")"
-    printf "  ${PK}[%s]${N} %-18s" "$id" "$name"
-    c=$((c+1))
-    (( c % 2 == 0 )) && echo || printf "  "
-  done
-  echo
-  echo
-  echo -e "  ${D}Format: 1   or  3.7.P02   or  P1 P5 12${N}"
-  echo
-  read -rp "$(echo -e "  ${C}Location(s): ${N}")" raw
-  [[ -z "$raw" ]] && return
-  raw=${raw//./ }; raw=${raw//,/ }
-  echo
-  for x in $raw; do
-    local id
-    id=$(parse_id "$x")
-    if [[ -z "$id" ]] || { ! is_tor_id "$id" && ! is_psi_id "$id"; }; then
-      echo -e "  ${R}Invalid: $x${N}"
-      continue
-    fi
-    start_one "$id"
-  done
-  echo
-  read -rp "  Press Enter..."
-}
+  echo -n '{'
+  echo -n '"ok":true,'
+  echo -n '"version":"'"$VERSION"'",'
+  echo -n '"panel":"'"$PANEL_VER"'",'
+  echo -n '"cpu":'"$cpu"','
+  echo -n '"mem":'"$mem"','
+  echo -n '"running_count":'"$cnt"','
+  echo -n '"mode":"'"$mode"'",'
+  echo -n '"balancer":{"active":'"$bal"',"port":'"$bport"',"target":"'"$btarget"'"},'
+  echo -n '"locations":['
 
-do_stop() {
-  header
-  echo -e "  ${C}Stop Location(s)${N}"
-  echo
-  if ! show_running_table; then
-    echo; read -rp "  Press Enter..."; return
-  fi
-  echo -e "  ${D}Format: 3   or  3.7.P02${N}"
-  echo
-  read -rp "$(echo -e "  ${C}Location(s): ${N}")" raw
-  [[ -z "$raw" ]] && return
-  raw=${raw//./ }; raw=${raw//,/ }
-  echo
-  for x in $raw; do
-    local id
-    id=$(parse_id "$x")
-    [[ -z "$id" ]] && continue
-    stop_one "$id"
-  done
-  echo
-  read -rp "  Press Enter..."
-}
+  local first=1 id code name port st cpu1 mem1 pid up
 
-start_all_tor() {
-  header
-  echo -e "  ${Y}Starting all Tor locations (careful on 1G RAM)...${N}"
-  echo
-  ulimit -n 65535 2>/dev/null || true
   for id in "${TOR_ORDER[@]}"; do
-    start_one "$id" || true
-    sleep 0.06
+    IFS='|' read -r code name port <<< "$(parse_tor "$id")"
+    st=false; cpu1="0.0"; mem1="0.0"; pid=""; up=$(get_setting "$id" uptime)
+    if running_tor "$code" "$port"; then
+      st=true
+      pid=$(tor_pid "$code" "$port")
+      read -r cpu1 mem1 <<< "$(node_cpu_mem "$pid")"
+    fi
+    [[ $first -eq 1 ]] || echo -n ','
+    first=0
+    printf '{"id":"%s","type":"tor","cc":"%s","name":"%s","port":%s,"running":%s,"cpu":%s,"mem":%s,"uptime":%s,"sticky":%s,"bandwidth":%s}' \
+      "$id" "$code" "$name" "$port" "$st" "$cpu1" "$mem1" "${up:-0}" \
+      "$(get_setting "$id" sticky)" "$(get_setting "$id" bandwidth)"
   done
-  echo
-  echo -e "  ${G}Done.${N}"
-  read -rp "  Press Enter..."
-}
 
-start_all_psi() {
-  header
-  echo -e "  ${Y}Starting all Psiphon locations...${N}"
-  echo
-  ensure_psiphon_binary || { read -rp "  Press Enter..."; return; }
   for id in "${PSI_ORDER[@]}"; do
-    start_one "$id" || true
-    sleep 0.3
+    IFS='|' read -r code name port <<< "$(parse_psi "$id")"
+    st=false; cpu1="0.0"; mem1="0.0"; pid=""; up=$(get_setting "$id" uptime)
+    if running_psi "$code" "$port"; then
+      st=true
+      pid=$(psi_pid "$code" "$port")
+      read -r cpu1 mem1 <<< "$(node_cpu_mem "$pid")"
+    fi
+    [[ $first -eq 1 ]] || echo -n ','
+    first=0
+    printf '{"id":"%s","type":"psi","cc":"%s","name":"%s","port":%s,"running":%s,"cpu":%s,"mem":%s,"uptime":%s,"sticky":0,"bandwidth":0}' \
+      "$id" "$code" "$name" "$port" "$st" "$cpu1" "$mem1" "${up:-0}"
   done
-  echo
-  echo -e "  ${G}Done.${N}"
-  read -rp "  Press Enter..."
+
+  echo ']}'
 }
 
-stop_all() {
-  header
-  echo -e "  ${Y}Stopping everything...${N}"
-  echo
-  for id in "${TOR_ORDER[@]}" "${PSI_ORDER[@]}"; do
-    stop_one "$id" || true
-  done
-  auto_stop
-  echo
-  echo -e "  ${G}All stopped.${N}"
-  read -rp "  Press Enter..."
+ping_one() {
+  local raw=$1 id code name port
+  id=$(resolve_id "$raw") || { echo '{"ok":false,"error":"bad id"}'; return 1; }
+  if [[ "$id" == T* ]]; then
+    IFS='|' read -r code name port <<< "$(parse_tor "$id")"
+    running_tor "$code" "$port" || { echo '{"id":"'"$id"'","ok":false,"error":"not running"}'; return 0; }
+  else
+    IFS='|' read -r code name port <<< "$(parse_psi "$id")"
+    running_psi "$code" "$port" || { echo '{"id":"'"$id"'","ok":false,"error":"not running"}'; return 0; }
+  fi
+  local t ip
+  t=$(curl --socks5-hostname "127.0.0.1:${port}" -o /dev/null -s -w "%{time_total}" --max-time 10 \
+    https://1.1.1.1/cdn-cgi/trace 2>/dev/null || echo 0)
+  ip=$(curl --socks5-hostname "127.0.0.1:${port}" -s --max-time 8 https://api.ipify.org 2>/dev/null || echo "?")
+  printf '{"id":"%s","ok":true,"latency":%s,"ip":"%s","port":%s,"name":"%s"}\n' \
+    "$id" "$t" "$ip" "$port" "$name"
+}
+
+# ---------------------------------------------------------------------------
+# Logs / port / bandwidth / sticky
+# ---------------------------------------------------------------------------
+view_log() {
+  local id code name port logfile
+  id=$(resolve_id "$1") || return 1
+  if [[ "$id" == T* ]]; then
+    IFS='|' read -r code name port <<< "$(parse_tor "$id")"
+    logfile="$LOG/${code}_${port}.log"
+  else
+    IFS='|' read -r code name port <<< "$(parse_psi "$id")"
+    logfile="$LOG/psi_${code}_${port}.log"
+  fi
+  echo -e "  ${C}Log: ${logfile}${N}"
+  line
+  if [[ -f "$logfile" ]]; then
+    tail -n 40 "$logfile"
+  else
+    echo "  (empty)"
+  fi
 }
 
 change_port() {
-  header
-  echo -e "  ${C}Change Location Port${N}"
-  echo
-  show_running_table || true
-  echo
-  read -rp "$(echo -e "  ${C}Location ID: ${N}")" raw
-  local id
-  id=$(parse_id "$raw")
-  if [[ -z "$id" ]] || { ! is_tor_id "$id" && ! is_psi_id "$id"; }; then
-    echo -e "  ${R}Invalid ID${N}"; sleep 1; return
-  fi
-  local code name port
-  IFS='|' read -r code name port <<< "$(info "$id")"
-  echo
-  echo -e "  Current: $name [${code}] on port ${W}$port${N}"
-  read -rp "  New port (40000-60000): " new
-  if ! [[ "$new" =~ ^[0-9]+$ ]] || (( new < 40000 || new > 60000 )); then
-    echo -e "  ${R}Invalid port${N}"; sleep 1; return
-  fi
-  stop_one "$id"
-  set_setting "$id" "port" "$new"
-  echo -e "  ${G}Port updated to $new${N}"
-  sleep 1.2
+  local id newport code name port
+  id=$(resolve_id "$1") || return 1
+  newport=$2
+  [[ "$newport" =~ ^[0-9]+$ ]] || { echo "bad port"; return 1; }
+  stop_one "$id" || true
+  set_setting "$id" port "$newport"
+  echo -e "  ${G}✓${N} $id port → $newport (start again to apply)"
+}
+
+set_bw() {
+  local id bw
+  id=$(resolve_id "$1") || return 1
+  bw=$2
+  set_setting "$id" bandwidth "$bw"
+  echo -e "  ${G}✓${N} $id bandwidth=${bw} MB (restart instance to apply)"
 }
 
 toggle_sticky() {
-  header
-  echo -e "  ${C}Toggle Sticky Exit (keep same exit IP as long as possible)${N}"
-  echo
-  for id in "${TOR_ORDER[@]}"; do
-    local code name port sticky
-    IFS='|' read -r code name port <<< "$(info "$id")"
-    sticky=$(get_setting "$id" "sticky")
-    local st="${D}off${N}"
-    [[ "$sticky" == "1" ]] && st="${G}ON${N}"
-    printf "  ${C}[%s]${N} %-20s %b\n" "$id" "$name" "$st"
-  done
-  line
-  echo
-  read -rp "$(echo -e "  ${C}Location ID (Tor only): ${N}")" raw
-  local id
-  id=$(parse_id "$raw")
-  if [[ -z "$id" ]] || ! is_tor_id "$id"; then
-    echo -e "  ${R}Invalid (Tor only)${N}"; sleep 1; return
-  fi
-  local cur
-  cur=$(get_setting "$id" "sticky")
+  local id cur
+  id=$(resolve_id "$1") || return 1
+  [[ "$id" == T* ]] || { echo "sticky only for Tor"; return 1; }
+  cur=$(get_setting "$id" sticky)
   if [[ "$cur" == "1" ]]; then
-    set_setting "$id" "sticky" "0"
-    echo -e "  ${Y}Sticky disabled${N}"
+    set_setting "$id" sticky 0
+    echo -e "  ${Y}sticky OFF${N} for $id"
   else
-    set_setting "$id" "sticky" "1"
-    echo -e "  ${G}Sticky enabled${N}"
+    set_setting "$id" sticky 1
+    echo -e "  ${G}sticky ON${N} for $id"
   fi
-  echo -e "  ${D}Restart the location to apply${N}"
-  sleep 1.5
 }
 
-set_bandwidth() {
-  header
-  echo -e "  ${C}Set Bandwidth Limit (MB) per location${N}"
-  echo
-  for id in "${TOR_ORDER[@]}"; do
-    local code name port bw
-    IFS='|' read -r code name port <<< "$(info "$id")"
-    bw=$(get_setting "$id" "bandwidth")
-    local disp="${D}unlimited${N}"
-    [[ "$bw" != "0" ]] && disp="${G}${bw} MB${N}"
-    printf "  ${C}[%s]${N} %-20s %b\n" "$id" "$name" "$disp"
-  done
-  line
-  echo
-  read -rp "$(echo -e "  ${C}Location ID (Tor): ${N}")" raw
-  local id
-  id=$(parse_id "$raw")
-  if [[ -z "$id" ]] || ! is_tor_id "$id"; then
-    echo -e "  ${R}Invalid${N}"; sleep 1; return
+# ---------------------------------------------------------------------------
+# Install helpers
+# ---------------------------------------------------------------------------
+download_psiphon() {
+  mkdir -p "$BIN"
+  if [[ -x "$PSI_BIN" ]]; then
+    echo -e "  ${G}✓${N} Psiphon binary present"
+    return 0
   fi
-  read -rp "$(echo -e "  ${M}Bandwidth MB (0=unlimited): ${N}")" bw
-  if ! [[ "$bw" =~ ^[0-9]+$ ]]; then
-    echo -e "  ${R}Invalid${N}"; sleep 1; return
-  fi
-  set_setting "$id" "bandwidth" "$bw"
-  echo -e "  ${G}Set to ${bw} MB (restart to apply)${N}"
-  sleep 1.3
-}
-
-set_perf_mode() {
-  header
-  echo -e "  ${C}Bandwidth / Performance Profile${N}"
-  echo
-  echo -e "  ${LG}[1]${N}  Weak     ${D}– low CPU, minimal circuits, gentle${N}"
-  echo -e "  ${CY}[2]${N}  Normal   ${D}– recommended balanced profile${N}"
-  echo -e "  ${LR}[3]${N}  Maximum  ${D}– more circuits, higher throughput (more CPU)${N}"
-  echo
-  echo -e "  Current: ${W}${PERF_MODE}${N}"
-  echo
-  echo -e "  ${D}Type 1 / 2 / 3  or  weak / normal / max${N}"
-  echo
-  read -rp "$(echo -e "  ${M}Select: ${N}")" choice
-  case "$choice" in
-    1|weak|w)   PERF_MODE="weak" ;;
-    2|normal|n) PERF_MODE="normal" ;;
-    3|max|m)    PERF_MODE="max" ;;
-    *) echo -e "  ${Y}No change${N}"; sleep 1; return ;;
-  esac
-  save_global
-  echo -e "  ${G}✓ Mode set to ${PERF_MODE}${N}"
-  echo -e "  ${D}Restart running locations to fully apply new profile${N}"
-  sleep 1.8
-}
-
-speed_test() {
-  header
-  echo -e "  ${C}Latency / Speed Test${N}"
-  echo
-  if ! show_running_table; then
-    echo; read -rp "  Press Enter..."; return
-  fi
-  echo -e "  ${D}Testing via Cloudflare...${N}"
-  echo
-  local ids
-  ids=$(list_running)
-  for id in $ids; do
-    local code name port
-    IFS='|' read -r code name port <<< "$(info "$id")"
-    local typ
-    is_tor_id "$id" && typ="Tor" || typ="Psi"
-    printf "  %-6s %-18s " "$typ" "$name"
-    local lat
-    lat=$(curl --socks5-hostname "127.0.0.1:$port" -o /dev/null -s -w "%{time_total}" \
-          --max-time 8 "https://www.cloudflare.com/cdn-cgi/trace" 2>/dev/null || echo "fail")
-    if [[ "$lat" == "fail" ]]; then
-      echo -e "${R}unreachable${N}"; continue
+  echo "  ↓ Downloading psiphon-tunnel-core (x86_64)..."
+  local urls=(
+    "https://github.com/Psiphon-Labs/psiphon-tunnel-core-binaries/raw/master/linux/psiphon-tunnel-core-x86_64"
+    "https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core-binaries/master/linux/psiphon-tunnel-core-x86_64"
+  )
+  local u ok=0
+  for u in "${urls[@]}"; do
+    if curl -fsSL --connect-timeout 15 --max-time 180 "$u" -o "$PSI_BIN"; then
+      chmod +x "$PSI_BIN"
+      ok=1
+      break
     fi
-    local speed_raw
-    speed_raw=$(curl --socks5-hostname "127.0.0.1:$port" -o /dev/null -s -w "%{speed_download}" \
-                --max-time 10 "https://speed.cloudflare.com/__down?bytes=1500000" 2>/dev/null || echo "0")
-    local speed_kb
-    speed_kb=$(awk -v s="$speed_raw" 'BEGIN{printf "%.0f", s/1024}')
-    local ip
-    ip=$(get_ip "$port" "$code")
-    echo -e "lat ${Y}${lat}s${N}  ~${G}${speed_kb} KB/s${N}  ip ${W}${ip}${N}"
   done
-  echo
-  read -rp "  Press Enter..."
+  if [[ $ok -eq 1 ]]; then
+    echo -e "  ${G}✓${N} Psiphon binary ready"
+  else
+    echo -e "  ${Y}!${N} Psiphon download failed – Tor features still work"
+  fi
 }
 
-view_log() {
-  header
-  echo -e "  ${C}View Log (last 30 lines)${N}"
-  echo
-  show_running_table || true
-  echo
-  read -rp "$(echo -e "  ${C}Location ID: ${N}")" raw
-  local id
-  id=$(parse_id "$raw")
-  if [[ -z "$id" ]]; then
-    echo -e "  ${R}Invalid${N}"; sleep 1; return
-  fi
-  local code name port
-  IFS='|' read -r code name port <<< "$(info "$id")"
-  local typ="tor"
-  is_psi_id "$id" && typ="psi"
-  local logfile="$LOG/${typ}_${code}_${port}.log"
-  if [[ ! -f "$logfile" ]]; then
-    echo -e "  ${Y}No log${N}"; sleep 1; return
-  fi
-  echo
-  line
-  tail -n 30 "$logfile" | sed 's/^/  /'
-  line
-  echo
-  read -rp "  Press Enter..."
-}
-
-uninstall() {
-  header
-  echo -e "  ${R}WARNING: Complete removal of tor-ml + web panel + data${N}"
-  echo
-  echo -e "  • All Tor & Psiphon processes will be killed"
-  echo -e "  • Web panel service (tor-ml-web) stopped & removed"
-  echo -e "  • $BASE deleted (configs, logs, data, web, binaries)"
-  echo -e "  • Command 'tor' removed from /usr/local/bin"
-  echo -e "  • socat/auto balancer cleaned"
-  echo
-  echo -ne "  Type ${R}YES${N} to confirm: "
-  read -r conf
-  if [[ "$conf" != "YES" ]]; then
-    echo -e "  ${Y}Cancelled${N}"; sleep 1; return
-  fi
-  echo
-  echo -e "  ${Y}[1/5] Stopping tunnels & balancer...${N}"
-  pkill -f "node_.*\.conf" 2>/dev/null || true
-  pkill -f "psiphon-tunnel-core" 2>/dev/null || true
-  pkill -f "socat.*$AUTO_PORT" 2>/dev/null || true
-  [[ -f "$AUTO_PID_FILE" ]] && kill "$(cat "$AUTO_PID_FILE")" 2>/dev/null || true
-  [[ -f "$STA/socat.pid" ]] && kill "$(cat "$STA/socat.pid")" 2>/dev/null || true
-  sleep 0.6
-  pkill -9 -f "node_.*\.conf" 2>/dev/null || true
-  pkill -9 -f "psiphon-tunnel-core" 2>/dev/null || true
-  pkill -9 -f "socat.*$AUTO_PORT" 2>/dev/null || true
-
-  echo -e "  ${Y}[2/5] Stopping web panel service...${N}"
-  systemctl stop tor-ml-web.service 2>/dev/null || true
-  systemctl disable tor-ml-web.service 2>/dev/null || true
-  rm -f /etc/systemd/system/tor-ml-web.service
-  systemctl daemon-reload 2>/dev/null || true
-  pkill -f "/opt/tor-ml/web/panel.py" 2>/dev/null || true
-  pkill -f "panel.py" 2>/dev/null || true
-
-  echo -e "  ${Y}[3/5] Removing install files...${N}"
-  rm -rf "$BASE"
-  rm -rf /opt/tor-ml
-  rm -f "$CMD"
-  rm -f /usr/local/bin/tor
-  rm -f /root/tor-ml.sh /root/panel.py /root/tor-ml.sh~ 2>/dev/null || true
-  rm -f /tmp/psilist.bin 2>/dev/null || true
-
-  echo -e "  ${Y}[4/5] Cleaning leftover processes...${N}"
-  sleep 0.2
-  pkill -9 -f "psiphon-tunnel-core" 2>/dev/null || true
-  pkill -9 -f "node_.*\.conf" 2>/dev/null || true
-
-  echo -e "  ${Y}[5/5] Done${N}"
-  echo -e "  ${G}✓ tor-ml, web panel, Tor data and all related files removed.${N}"
-  exit 0
-}
-
-# =============================================================================
-# INSTALL – NEVER calls clear / header. Full visible progress.
-# =============================================================================
-
-# ---------------------------------------------------------------------------
-# Machine interface (web panel + automation)
-# ---------------------------------------------------------------------------
-json_status() {
-  load_perf
-  local cpu mem
-  cpu=$(awk '/cpu /{u=$2+$4; t=$2+$4+$5; if(t>0) printf "%.1f", u/t*100; else print 0; exit}' /proc/stat)
-  mem=$(awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{if(t) printf "%.1f", (t-a)/t*100; else print 0}' /proc/meminfo)
-  local bal_active=false bal_target="" best_id=""
-  if [[ -f "$AUTO_PID_FILE" ]] && kill -0 "$(cat "$AUTO_PID_FILE" 2>/dev/null)" 2>/dev/null; then
-    bal_active=true
-  fi
-  [[ -f "$STA/best.port" ]] && bal_target=$(cat "$STA/best.port" 2>/dev/null || true)
-  [[ -f "$STA/best.id" ]] && best_id=$(cat "$STA/best.id" 2>/dev/null || true)
-  local sticky_g=0
-  [[ -f "$GLOBAL" ]] && grep -q 'sticky=1' "$GLOBAL" 2>/dev/null && sticky_g=1
-  printf '{"ok":true,"version":"%s","mode":"%s","cpu":%s,"mem":%s,' "$VERSION" "$PERF_MODE" "${cpu:-0}" "${mem:-0}"
-  printf '"sticky_global":%s,"balancer":{"active":%s,"port":%s,"target":"%s","best_id":"%s"},' \
-    "$sticky_g" "$bal_active" "$AUTO_PORT" "$bal_target" "$best_id"
-  printf '"locations":['
-  local first=1 run_count=0 id code name port typ is_run pid pcpu pmem
-  for id in "${TOR_ORDER[@]}" "${PSI_ORDER[@]}"; do
-    IFS='|' read -r code name port <<< "$(info "$id")"
-    if is_tor_id "$id"; then typ="tor"; else typ="psi"; fi
-    is_run=false; pcpu=null; pmem=null; pid=""
-    if running "$id"; then
-      is_run=true; run_count=$((run_count+1))
-      pid=$(get_pid "$id")
-      if [[ -n "$pid" ]]; then
-        pcpu=$(ps -p "$pid" -o %cpu= 2>/dev/null | tr -d ' ' || echo null)
-        pmem=$(ps -p "$pid" -o rss= 2>/dev/null | awk '{printf "%.1f", $1/1024}' || echo null)
-        [[ -z "$pcpu" ]] && pcpu=null
-        [[ -z "$pmem" ]] && pmem=null
+install_web_files() {
+  mkdir -p "$WEB"
+  local self dir candidates
+  self=$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "$0")
+  dir=$(dirname "$self")
+  candidates=(
+    "$dir/web/panel.py"
+    "/root/web/panel.py"
+    "/root/panel.py"
+    "$WEB/panel.py"
+  )
+  local c
+  for c in "${candidates[@]}"; do
+    if [[ -f "$c" && -s "$c" ]]; then
+      # skip if file is GitHub 404 page
+      if head -1 "$c" | grep -q '404: Not Found'; then
+        continue
+      fi
+      if head -1 "$c" | grep -q python; then
+        cp -f "$c" "$WEB/panel.py"
+        chmod +x "$WEB/panel.py"
+        echo -e "  ${G}✓${N} panel.py → $WEB/panel.py"
+        return 0
       fi
     fi
-    [[ $first -eq 1 ]] || printf ','
-    first=0
-    name=${name//\"/}
-    printf '{"id":"%s","type":"%s","code":"%s","name":"%s","port":%s,"running":%s,"cpu_pct":%s,"mem_mb":%s,"latency":null,"ip":null}' \
-      "$id" "$typ" "$code" "$name" "$port" "$is_run" "${pcpu:-null}" "${pmem:-null}"
   done
-  printf '],"running_count":%s}\n' "$run_count"
+  echo -e "  ${Y}!${N} panel.py not found – place it at $WEB/panel.py then: systemctl restart tor-ml-web"
+  return 1
 }
 
-json_log() {
-  local id code name port file
-  id=$(parse_id "${1:-}")
-  [[ -z "$id" ]] && { echo '{"ok":false,"log":"invalid id"}'; return 1; }
-  IFS='|' read -r code name port <<< "$(info "$id")"
-  if is_tor_id "$id"; then file="$LOG/tor_${code}_${port}.log"; else file="$LOG/psi_${code}_${port}.log"; fi
-  python3 - "$file" <<'PY'
-import json,sys
-p=sys.argv[1]
-try:
-  lines=open(p,errors="replace").read().splitlines()[-100:]
-  print(json.dumps({"ok":True,"log":"\n".join(lines)}))
-except Exception:
-  print(json.dumps({"ok":True,"log":"(no log file)"}))
-PY
-}
-
-cli_start_all_tor() { local id; for id in "${TOR_ORDER[@]}"; do start_one "$id" || true; done; }
-cli_start_all_psi() { local id; for id in "${PSI_ORDER[@]}"; do start_one "$id" || true; done; }
-
-
-ping_one() {
-  local id code name port
-  id=$(parse_id "${1:-}")
-  [[ -z "$id" ]] && { echo "invalid id"; return 1; }
-  IFS='|' read -r code name port <<< "$(info "$id")"
-  if ! running "$id"; then
-    echo "$id $name not running"
-    return 1
-  fi
-  local lat ip
-  lat=$(curl --socks5-hostname "127.0.0.1:$port" -o /dev/null -s -w "%{time_total}" --max-time 8 "https://www.cloudflare.com/cdn-cgi/trace" 2>/dev/null || echo "fail")
-  if [[ "$lat" == "fail" ]]; then
-    echo "$id $name port=$port latency=FAIL ip=?"
-    return 1
-  fi
-  lat=$(awk -v t="$lat" 'BEGIN{printf "%.0f", t*1000}')
-  ip=$(curl --socks5-hostname "127.0.0.1:$port" -s --max-time 8 "https://api.ipify.org" 2>/dev/null || echo "?")
-  echo "$id $name port=$port latency=${lat}ms ip=$ip"
-}
-
-ping_test() {
-  local id any=0
-  echo "=== Ping test (running exits) ==="
-  for id in "${TOR_ORDER[@]}" "${PSI_ORDER[@]}"; do
-    if running "$id"; then
-      any=1
-      ping_one "$id" || true
-    fi
-  done
-  [[ $any -eq 0 ]] && echo "No running locations"
-}
-
-install_web_panel() {
-  need_root
-  local webdir="$BASE/web"
-  mkdir -p "$webdir" "$CFG"
-  local src=""
-  if [[ -f "$(dirname "${BASH_SOURCE[0]}")/web/panel.py" ]]; then src="$(dirname "${BASH_SOURCE[0]}")/web/panel.py"
-  elif [[ -f /root/panel.py ]]; then src=/root/panel.py
-  elif [[ -f "$webdir/panel.py" ]]; then src="$webdir/panel.py"
-  fi
-  if [[ -n "$src" && "$src" != "$webdir/panel.py" ]]; then tr -d '\r' < "$src" > "$webdir/panel.py"; fi
-  if [[ ! -f "$webdir/panel.py" ]]; then
-    echo -e "  ${Y}panel.py not found – put it at $webdir/panel.py then: tor --install-web${N}"
-    return 1
-  fi
-  chmod +x "$webdir/panel.py"
-
-  local p_user="admin" p_pass="admin123" p_port="8080" p_host="0.0.0.0"
-  echo
-  echo -e "  ${C}Web panel admin setup${N}"
-  echo -ne "  Username [${W}admin${N}]: "; read -r p_user; p_user=${p_user:-admin}
-  echo -ne "  Password [${W}admin123${N}]: "; read -r p_pass; p_pass=${p_pass:-admin123}
-  echo -ne "  Panel port [${W}8080${N}]: "; read -r p_port; p_port=${p_port:-8080}
-  echo -ne "  Bind host [${W}0.0.0.0${N}]: "; read -r p_host; p_host=${p_host:-0.0.0.0}
-
-  PANEL_USER="$p_user" PANEL_PASS="$p_pass" PANEL_PORT="$p_port" PANEL_HOST="$p_host" python3 - <<'PY'
-import json, hashlib, secrets, pathlib, os
-salt="tor-ml-v4.3.1"
-pw=os.environ.get("PANEL_PASS","admin123")
-h=hashlib.pbkdf2_hmac("sha256", pw.encode(), salt.encode(), 120000).hex()
-path=pathlib.Path("/opt/tor-ml/config/panel.json")
-path.parent.mkdir(parents=True, exist_ok=True)
-path.write_text(json.dumps({
-  "username": os.environ.get("PANEL_USER","admin"),
-  "password_hash": h,
-  "host": os.environ.get("PANEL_HOST","0.0.0.0"),
-  "port": int(os.environ.get("PANEL_PORT","8080")),
-  "session_secret": secrets.token_hex(32),
-  "setup_done": True
-}, indent=2))
-path.chmod(0o600)
-print("panel.json written")
-PY
-
+write_web_service() {
+  local tok
+  tok=$(api_token)
   cat > /etc/systemd/system/tor-ml-web.service <<EOF
 [Unit]
-Description=tor-ml Web Control Panel
-After=network.target
+Description=tor-ml Web Control Panel ${PANEL_VER}
+After=network-online.target
+Wants=network-online.target
+
 [Service]
 Type=simple
-Environment=TOR_ML_BASE=/opt/tor-ml
-Environment=TOR_ML_CLI=/usr/local/bin/tor
-ExecStart=/usr/bin/python3 /opt/tor-ml/web/panel.py
-Restart=on-failure
-RestartSec=3
+Environment=TOR_ML_BASE=${BASE}
+Environment=TOR_ML_CLI=${CMD}
+Environment=TOR_ML_TOKEN=${tok}
+ExecStart=/usr/bin/python3 ${WEB}/panel.py
+Restart=always
+RestartSec=2
 User=root
+LimitNOFILE=65535
+
 [Install]
 WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
-  systemctl enable --now tor-ml-web.service
-  echo -e "  ${G}✓ Web panel → http://SERVER_IP:${p_port}${N}"
-  echo -e "  ${G}  user=${p_user}${N}"
+  systemctl enable tor-ml-web.service
+  systemctl restart tor-ml-web.service
 }
 
+setup_ssl() {
+  local domain=$1
+  [[ -n "$domain" ]] || return 0
+  echo -e "  ${C}Configuring HTTPS for ${domain}...${N}"
+  apt-get install -y -qq nginx certbot python3-certbot-nginx >/dev/null 2>&1 || true
+  local pport
+  pport=$(python3 -c "import json;print(json.load(open('${PANEL_JSON}')).get('port',8080))" 2>/dev/null || echo 8080)
+  cat > /etc/nginx/sites-available/tor-ml-panel <<EOF
+server {
+    listen 80;
+    server_name ${domain};
+    location / {
+        proxy_pass http://127.0.0.1:${pport};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+    }
+}
+EOF
+  ln -sf /etc/nginx/sites-available/tor-ml-panel /etc/nginx/sites-enabled/tor-ml-panel
+  rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+  nginx -t 2>/dev/null && systemctl reload nginx || true
+  if certbot --nginx -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect 2>/dev/null; then
+    echo -e "  ${G}✓${N} HTTPS ready: https://${domain}"
+  else
+    echo -e "  ${Y}!${N} certbot failed (DNS A record must point here). HTTP proxy still on :80 → panel"
+  fi
+}
 
 install() {
   need_root
-
+  # IMPORTANT: no clear during install (user complained about wiped terminal)
   echo
-  echo -e "  ${LB}████  tor-ml v${VERSION}  –  Installer${N}"
-  echo -e "  ${D}════════════════════════════════════════${N}"
-  echo
+  echo -e "  ${C}${W}████  tor-ml v${VERSION}  –  Full Installer${N}"
+  echo -e "  ${D}════════════════════════════════════════════════${N}"
 
   if [[ -d "$BASE" ]]; then
-    echo -e "  ${Y}Previous installation found at $BASE${N}"
-    echo -e "  ${C}[u]${N} Update in place (keep data)   ${C}[r]${N} Remove & reinstall   ${C}[n]${N} Cancel"
-    echo -ne "  Choice [u/r/N]: "
-    read -r ans
-    case "${ans,,}" in
-      u|update)
-        echo -e "  ${G}Updating in place...${N}"
-        systemctl stop tor-ml-web.service 2>/dev/null || true
-        ;;
-      r|remove|y|yes)
-        echo -e "  ${Y}Cleaning old version...${N}"
-        pkill -f "node_.*\.conf" 2>/dev/null || true
-        pkill -f "psiphon-tunnel-core" 2>/dev/null || true
-        pkill -f "socat.*$AUTO_PORT" 2>/dev/null || true
-        systemctl stop tor-ml-web.service 2>/dev/null || true
-        systemctl disable tor-ml-web.service 2>/dev/null || true
-        rm -f /etc/systemd/system/tor-ml-web.service
-        sleep 0.5
-        rm -rf "$BASE"
-        rm -f "$CMD"
-        echo -e "  ${G}Old version removed.${N}"
-        ;;
-      *)
-        echo -e "  ${Y}Install cancelled.${N}"
-        exit 0
-        ;;
-    esac
-    echo
+    echo -e "  ${Y}Existing install detected at $BASE${N}"
+    read -rp "  Remove previous install and continue? [y/N]: " ans
+    if [[ "${ans,,}" == "y" || "${ans,,}" == "yes" ]]; then
+      systemctl stop tor-ml-web 2>/dev/null || true
+      pkill -f "psiphon-tunnel-core" 2>/dev/null || true
+      pkill -f "tor -f ${CFG}/node_" 2>/dev/null || true
+      rm -rf "$BASE"
+    else
+      echo "  Aborted."
+      exit 0
+    fi
   fi
 
-  echo -e "  ${C}[1/6]${N} Updating package lists..."
+  export DEBIAN_FRONTEND=noninteractive
+  echo -e "  [1/8] apt update..."
   apt-get update -qq
-  DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade tor curl socat python3 2>/dev/null || true
-  echo -e "  ${G}      done${N}"
-
-  echo -e "  ${C}[2/7]${N} Installing dependencies (tor, curl, socat, netcat, python3)..."
-  DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    tor tor-geoipdb curl bc netcat-openbsd socat python3 >/dev/null 2>&1 || true
-  echo -e "  ${G}      done${N}"
-
-  echo -e "  ${C}[3/7]${N} Creating debian-tor user if needed..."
-  if ! id debian-tor &>/dev/null; then
-    useradd --system --home-dir /var/lib/tor --shell /usr/sbin/nologin debian-tor 2>/dev/null || true
-  fi
-  systemctl stop tor 2>/dev/null || true
-  systemctl disable tor 2>/dev/null || true
-  echo -e "  ${G}      done${N}"
-
-  echo -e "  ${C}[4/7]${N} Creating directories..."
-  mkdir -p "$CFG" "$DAT" "$LOG" "$STA" "$BIN" "$PSI"
-  chown -R debian-tor:debian-tor "$DAT" "$LOG" 2>/dev/null || true
-  echo -e "  ${G}      done${N}"
-
-  echo -e "  ${C}[5/7]${N} Installing tor-ml command..."
-  # Copy ourselves with CR stripped
-  if [[ -f "$0" ]]; then
-    tr -d '\r' < "$0" > "$CMD"
-  else
-    cp "$0" "$CMD" 2>/dev/null || true
-  fi
-  chmod +x "$CMD"
+  echo -e "  [2/8] packages: tor curl socat netcat python3..."
+  apt-get install -y -qq tor curl socat python3 ca-certificates >/dev/null
+  apt-get install -y -qq netcat-openbsd 2>/dev/null || apt-get install -y -qq netcat 2>/dev/null || true
+  echo -e "  [3/8] debian-tor user..."
+  id debian-tor >/dev/null 2>&1 || useradd --system --home /var/lib/tor --shell /usr/sbin/nologin debian-tor 2>/dev/null || true
+  echo -e "  [4/8] directories + token..."
   init_dirs
-  migrate_settings
-  echo "perf=normal" > "$GLOBAL"
-  echo -e "  ${G}      done  →  ${W}$CMD${N}"
+  echo -e "  [5/8] install CLI → ${CMD}"
+  local src
+  src=$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "$0")
+  cp -f "$src" "$CMD"
+  cp -f "$src" "$SELF_SCRIPT"
+  chmod +x "$CMD" "$SELF_SCRIPT"
+  echo -e "  [6/8] Psiphon binary..."
+  download_psiphon
+  echo -e "  [7/8] Web panel files..."
+  install_web_files || true
 
-  echo -e "  ${C}[6/7]${N} Preparing Psiphon binary (x86_64 only)..."
-  ensure_psiphon_binary || true
+  echo -e "  ${C}Admin & panel settings${N}"
+  local user pass port host domain
+  read -rp "  Username [admin]: " user; user=${user:-admin}
+  read -rp "  Password [admin123]: " pass; pass=${pass:-admin123}
+  read -rp "  Panel port [8080]: " port; port=${port:-8080}
+  read -rp "  Bind host [0.0.0.0]: " host; host=${host:-0.0.0.0}
+  read -rp "  Domain for auto-HTTPS (empty = IP only): " domain
 
-  echo
-  echo -e "  ${G}════════════════════════════════════════${N}"
-  echo -e "  ${G}✓ Installation complete!${N}"
-  echo
-  mkdir -p "$BASE/web"
-  if [[ -f "$(dirname "${BASH_SOURCE[0]}")/web/panel.py" ]]; then tr -d '\r' < "$(dirname "${BASH_SOURCE[0]}")/web/panel.py" > "$BASE/web/panel.py"; fi
-  if [[ -f /root/panel.py ]]; then tr -d '\r' < /root/panel.py > "$BASE/web/panel.py"; fi
-  if [[ -f "$BASE/web/panel.py" ]]; then install_web_panel || true; else echo -e "  ${Y}panel.py missing – copy to /opt/tor-ml/web/panel.py && tor --install-web${N}"; fi
-  echo -e "  CLI:  ${W}tor${N}"
-  echo -e "  Web:  ${W}http://SERVER_IP:8080${N}  (admin / admin123)"
+  python3 - <<PY
+import json, hashlib, secrets, os
+SALT = "tor-ml-v4.4"
+def hp(pw):
+    return hashlib.pbkdf2_hmac("sha256", pw.encode(), SALT.encode(), 120_000).hex()
+tok = ""
+if os.path.exists("${TOKEN_FILE}"):
+    tok = open("${TOKEN_FILE}").read().strip()
+cfg = {
+    "username": """${user}""",
+    "password_hash": hp("""${pass}"""),
+    "host": """${host}""",
+    "port": int("""${port}"""),
+    "session_secret": secrets.token_hex(32),
+    "setup_done": True,
+    "api_token": tok,
+    "panel_version": "${PANEL_VER}",
+}
+open("${PANEL_JSON}", "w").write(json.dumps(cfg, indent=2))
+print("  panel.json written")
+PY
+  chmod 600 "$PANEL_JSON"
+
+  echo -e "  [8/8] systemd web service..."
+  if [[ -f "$WEB/panel.py" ]]; then
+    write_web_service
+  else
+    echo -e "  ${Y}!${N} skipping web service (no panel.py)"
+  fi
+
+  if [[ -n "${domain}" ]]; then
+    setup_ssl "$domain"
+  fi
+
+  echo -e "  ${D}════════════════════════════════════════════════${N}"
+  echo -e "  ${G}✓ Installation complete – v${VERSION} / panel ${PANEL_VER}${N}"
+  echo -e "  CLI:   ${W}tor${N}"
+  echo -e "  Web:   ${W}http://SERVER_IP:${port}${N}   user=${user}"
+  [[ -n "${domain}" ]] && echo -e "  HTTPS: ${W}https://${domain}${N}"
+  echo -e "  Open AWS Security Group for port ${port} (and 80/443 if domain)."
   echo
 }
 
-main() {
-  ulimit -n 65535 2>/dev/null || true
-  init_dirs
-  migrate_settings
-  load_global
+uninstall() {
+  need_root
+  echo -e "  ${R}Full uninstall...${N}"
+  stop_all 2>/dev/null || true
+  systemctl disable --now tor-ml-web.service 2>/dev/null || true
+  rm -f /etc/systemd/system/tor-ml-web.service
+  systemctl daemon-reload 2>/dev/null || true
+  pkill -f "psiphon-tunnel-core" 2>/dev/null || true
+  pkill -f "tor -f ${CFG}/node_" 2>/dev/null || true
+  pkill -f "${WEB}/panel.py" 2>/dev/null || true
+  pkill -f "socat TCP-LISTEN:${AUTO_PORT}" 2>/dev/null || true
+  rm -f "$CMD" /usr/local/bin/tor-ml
+  rm -rf "$BASE"
+  rm -f /etc/nginx/sites-enabled/tor-ml-panel /etc/nginx/sites-available/tor-ml-panel
+  nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || true
+  echo -e "  ${G}✓ Everything related to tor-ml removed${N}"
+}
 
-  if ! pgrep -f "tor-ml-watchdog" >/dev/null 2>&1; then
-    (
-      exec -a tor-ml-watchdog bash -c '
-        while true; do
-          sleep 90
-          for f in /opt/tor-ml/status/*.pid; do
-            [[ -f "$f" ]] || continue
-            pid=$(cat "$f" 2>/dev/null)
-            kill -0 "$pid" 2>/dev/null || rm -f "$f"
-          done
-        done
-      ' &
-    ) 2>/dev/null || true
-  fi
+# ---------------------------------------------------------------------------
+# Terminal UI
+# ---------------------------------------------------------------------------
+header() {
+  clear
+  local cpu mem cnt mode
+  read -r cpu mem cnt <<< "$(global_stats)"
+  mode=$(load_perf)
+  local bal="off"
+  balancer_active && bal="ON :${AUTO_PORT}"
+  echo
+  echo -e "  ${C}${W}████  tor-ml  v${VERSION}${N}  ${D}• Panel ${PANEL_VER}${N}"
+  echo -e "  ${D}══════════════════════════════════════════════════════════════${N}"
+  echo -e "  ${G}●${N} Running ${W}${cnt}${N}  |  CPU ${OR}${cpu}%${N}  |  MEM ${OR}${mem}%${N}  |  Mode ${Y}${mode^^}${N}"
+  echo -e "  ${G}●${N} Path    ${W}${BASE}${N}"
+  echo -e "  ${G}●${N} Balance ${W}${bal}${N}"
+  echo -e "  ${D}──────────────────────────────────────────────────────────────${N}"
+  echo -e "  ${D}Tor + Psiphon multi-exit  •  web panel sync  •  low-end VPS${N}"
+  echo -e "  ${D}──────────────────────────────────────────────────────────────${N}"
+}
 
+status_screen() {
+  header
+  printf "  ${W}%-5s %-4s %-4s %-20s %-6s %-8s %s${N}\n" ID TYPE CC NAME PORT STATE UPTIME
+  line
+  local id code name port up
+  for id in "${TOR_ORDER[@]}"; do
+    IFS='|' read -r code name port <<< "$(parse_tor "$id")"
+    up=$(format_uptime "$(get_setting "$id" uptime)")
+    if running_tor "$code" "$port"; then
+      printf "  %-5s %-4s %-4s %-20s %-6s ${G}%-8s${N} %s\n" "$id" TOR "$code" "$name" "$port" ON "$up"
+    else
+      printf "  %-5s %-4s %-4s %-20s %-6s ${D}%-8s${N} %s\n" "$id" TOR "$code" "$name" "$port" off "--"
+    fi
+  done
+  line
+  for id in "${PSI_ORDER[@]}"; do
+    IFS='|' read -r code name port <<< "$(parse_psi "$id")"
+    up=$(format_uptime "$(get_setting "$id" uptime)")
+    if running_psi "$code" "$port"; then
+      printf "  %-5s %-4s %-4s %-20s %-6s ${G}%-8s${N} %s\n" "$id" PSI "$code" "$name" "$port" ON "$up"
+    else
+      printf "  %-5s %-4s %-4s %-20s %-6s ${D}%-8s${N} %s\n" "$id" PSI "$code" "$name" "$port" off "--"
+    fi
+  done
+}
+
+speed_screen() {
+  header
+  echo -e "  ${C}Latency test (running instances via Cloudflare)${N}"
+  line
+  local id code name port
+  for id in "${TOR_ORDER[@]}"; do
+    IFS='|' read -r code name port <<< "$(parse_tor "$id")"
+    running_tor "$code" "$port" || continue
+    echo -n "  Tor  ${name}  "
+    ping_one "$id"
+  done
+  for id in "${PSI_ORDER[@]}"; do
+    IFS='|' read -r code name port <<< "$(parse_psi "$id")"
+    running_psi "$code" "$port" || continue
+    echo -n "  Psi  ${name}  "
+    ping_one "$id"
+  done
+}
+
+main_menu() {
   while true; do
     header
-    echo -e "  ${LB}[1]${N}  Full Status"
-    echo -e "  ${G}[2]${N}  Start Location(s)"
-    echo -e "  ${Y}[3]${N}  Stop Location(s)"
-    echo -e "  ${C}[4]${N}  Start All Tor          ${D}(careful on 1G)${N}"
-    echo -e "  ${PK}[5]${N}  Start All Psiphon"
-    echo -e "  ${OR}[6]${N}  Stop All"
-    echo -e "  ${B}[7]${N}  Change Port"
-    echo -e "  ${M}[8]${N}  Speed / Latency Test"
-    echo -e "  ${C}[9]${N}  View Log"
-    echo -e "  ${LG}[10]${N} Set Bandwidth (per node)"
-    echo -e "  ${CY}[11]${N} Toggle Sticky Exit (Tor)"
-    echo -e "  ${W}[12]${N} Performance Mode  ${D}(Weak / Normal / Max)${N}"
-    echo -e "  ${G}[13]${N} Start Auto Balancer (best-ping)"
-    echo -e "  ${Y}[14]${N} Stop Auto Balancer"
+    echo -e "  ${C}[1]${N}  Full status"
+    echo -e "  ${C}[2]${N}  Start location(s)"
+    echo -e "  ${C}[3]${N}  Stop location(s)"
+    echo -e "  ${C}[4]${N}  Start all Tor"
+    echo -e "  ${C}[5]${N}  Start all Psiphon"
+    echo -e "  ${C}[6]${N}  Stop all"
+    echo -e "  ${C}[7]${N}  Change port"
+    echo -e "  ${C}[8]${N}  Speed / latency test"
+    echo -e "  ${C}[9]${N}  View log"
+    echo -e "  ${C}[10]${N} Set bandwidth (MB)"
+    echo -e "  ${C}[11]${N} Toggle sticky exit (Tor)"
+    echo -e "  ${C}[12]${N} Balancer start"
+    echo -e "  ${C}[13]${N} Balancer stop"
+    echo -e "  ${C}[14]${N} Performance mode (weak/normal/max)"
     echo -e "  ${R}[15]${N} Uninstall"
-    echo -e "  ${D}[0]${N}  Exit"
+    echo -e "  ${Y}[0]${N}  Exit"
     echo
     read -rp "$(echo -e "  ${M}Select: ${N}")" choice
-    case $choice in
-      1)  full_status ;;
-      2)  do_start ;;
-      3)  do_stop ;;
-      4)  start_all_tor ;;
-      5)  start_all_psi ;;
-      6)  stop_all ;;
-      7)  change_port ;;
-      8)  speed_test ;;
-      9)  view_log ;;
-      10) set_bandwidth ;;
-      11) toggle_sticky ;;
-      12) set_perf_mode ;;
-      13) auto_start; sleep 1.2 ;;
-      14) auto_stop; sleep 1.2 ;;
-      15) uninstall ;;
-      0)  clear; exit 0 ;;
+    case "$choice" in
+      1) status_screen; pause ;;
+      2)
+        status_screen
+        read -rp "  Start ID(s) e.g. T01 P03: " ids
+        for x in $ids; do start_one "$x" || true; done
+        pause
+        ;;
+      3)
+        read -rp "  Stop ID(s): " ids
+        for x in $ids; do stop_one "$x" || true; done
+        pause
+        ;;
+      4) start_all_tor; pause ;;
+      5) start_all_psi; pause ;;
+      6) stop_all; pause ;;
+      7)
+        read -rp "  ID: " id
+        read -rp "  New port: " p
+        change_port "$id" "$p"
+        pause
+        ;;
+      8) speed_screen; pause ;;
+      9)
+        read -rp "  ID: " id
+        view_log "$id"
+        pause
+        ;;
+      10)
+        read -rp "  ID: " id
+        read -rp "  Bandwidth MB (0=unlimited): " bw
+        set_bw "$id" "$bw"
+        pause
+        ;;
+      11)
+        read -rp "  Tor ID: " id
+        toggle_sticky "$id"
+        pause
+        ;;
+      12) auto_start; pause ;;
+      13) auto_stop; pause ;;
+      14)
+        echo -e "  Current: ${Y}$(load_perf)${N}"
+        echo "  1) weak  2) normal  3) max"
+        read -rp "  Choice: " m
+        case "$m" in 1) save_perf weak ;; 3) save_perf max ;; *) save_perf normal ;; esac
+        echo -e "  ${G}✓${N} mode=$(load_perf)"
+        pause
+        ;;
+      15)
+        read -rp "  Type YES to uninstall: " x
+        [[ "$x" == "YES" ]] && { uninstall; exit 0; }
+        ;;
+      0) clear; exit 0 ;;
     esac
   done
 }
 
-# Entry
+# ---------------------------------------------------------------------------
+# Entry / CLI API for web panel
+# ---------------------------------------------------------------------------
 case "${1:-}" in
-  --install) install; exit 0 ;;
-  --install-web) need_root; install_web_panel; exit 0 ;;
+  --install)   install; exit 0 ;;
+  --uninstall) uninstall; exit 0 ;;
   --json-status)
-    [[ -d "$BASE" ]] || { echo '{"ok":false}'; exit 1; }
-    init_dirs; load_perf; json_status; exit 0 ;;
-  --json-log)
-    [[ -d "$BASE" ]] || exit 1
-    init_dirs; json_log "${2:-}"; exit 0 ;;
+    init_dirs
+    json_status
+    exit 0
+    ;;
   --start)
-    need_root; init_dirs; load_perf
-    id=$(parse_id "${2:-}"); [[ -n "$id" ]] || { echo invalid; exit 1; }
-    start_one "$id"; exit $? ;;
+    init_dirs
+    shift
+    for id in "$@"; do start_one "$id" || true; done
+    exit 0
+    ;;
   --stop)
-    need_root; init_dirs
-    id=$(parse_id "${2:-}"); [[ -n "$id" ]] || { echo invalid; exit 1; }
-    stop_one "$id"; exit $? ;;
-  --start-all-tor) need_root; init_dirs; load_perf; cli_start_all_tor; exit 0 ;;
-  --start-all-psi) need_root; init_dirs; load_perf; cli_start_all_psi; exit 0 ;;
-  --stop-all) need_root; init_dirs; stop_all; auto_stop 2>/dev/null || true; exit 0 ;;
-  --balancer-start) need_root; init_dirs; load_perf; auto_start; exit 0 ;;
-  --balancer-stop) need_root; init_dirs; auto_stop; exit 0 ;;
-  --set-mode)
-    need_root; init_dirs
-    case "${2:-}" in weak|normal|max) echo "perf=${2}" > "$GLOBAL"; echo "mode=${2}";;
-      *) echo "use weak|normal|max"; exit 1;; esac
-    exit 0 ;;
-  --sticky)
-    need_root; init_dirs
-    if [[ "${2:-}" == "on" ]]; then
-      grep -q 'sticky=' "$GLOBAL" 2>/dev/null && sed -i 's/sticky=.*/sticky=1/' "$GLOBAL" || echo "sticky=1" >> "$GLOBAL"
-    else
-      grep -q 'sticky=' "$GLOBAL" 2>/dev/null && sed -i 's/sticky=.*/sticky=0/' "$GLOBAL" || echo "sticky=0" >> "$GLOBAL"
-    fi
-    exit 0 ;;
-  --speed-test) need_root; init_dirs; speed_test; exit 0 ;;
-  --ping-test) need_root; init_dirs; ping_test; exit 0 ;;
-  --ping-one) need_root; init_dirs; ping_one "${2:-}"; exit $? ;;
-  --change-port)
-    need_root; init_dirs
-    id=$(parse_id "${2:-}"); newport="${3:-}"
-    [[ -n "$id" && -n "$newport" ]] || { echo "usage: --change-port ID PORT"; exit 1; }
-    set_setting "$id" "port" "$newport"
-    echo "saved port $newport for $id (restart location to apply)"
-    exit 0 ;;
+    init_dirs
+    shift
+    for id in "$@"; do stop_one "$id" || true; done
+    exit 0
+    ;;
+  --start-all-tor) init_dirs; start_all_tor; exit 0 ;;
+  --start-all-psi) init_dirs; start_all_psi; exit 0 ;;
+  --stop-all)      init_dirs; stop_all; exit 0 ;;
+  --balancer-start) init_dirs; auto_start; exit 0 ;;
+  --balancer-stop)  init_dirs; auto_stop; exit 0 ;;
+  --mode)
+    init_dirs
+    save_perf "${2:-normal}"
+    echo "{\"ok\":true,\"mode\":\"$(load_perf)\"}"
+    exit 0
+    ;;
+  --ping)
+    init_dirs
+    ping_one "${2:-}"
+    exit 0
+    ;;
+  --log)
+    init_dirs
+    view_log "${2:-}"
+    exit 0
+    ;;
+  --version)
+    echo "$VERSION"
+    exit 0
+    ;;
+  --help|-h)
+    cat <<EOF
+tor-ml v${VERSION}
+  tor                  interactive menu
+  tor --install
+  tor --uninstall
+  tor --json-status
+  tor --start T01 P01
+  tor --stop T01
+  tor --start-all-tor | --start-all-psi | --stop-all
+  tor --balancer-start | --balancer-stop
+  tor --mode weak|normal|max
+  tor --ping T01
+  tor --version
+EOF
+    exit 0
+    ;;
 esac
 
 if [[ ! -d "$BASE" ]]; then
@@ -1497,4 +1287,5 @@ if [[ ! -d "$BASE" ]]; then
   exit 1
 fi
 
-main
+init_dirs
+main_menu
