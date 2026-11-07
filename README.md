@@ -1,6 +1,6 @@
 # 🔥 Tor-ML-PRO- 
 
-**VERSION 4.2**
+**VERSION 4.4**
 
 > ⚡ **نسخه ۴.۰.۰ منتشر شد** — حالا با پشتیبانی از **Psiphon** در کنار **Tor**، به همراه **Performance Mode** (Weak / Normal / Max) و بازطراحی کامل منو با ظاهر مدرن‌تر.
 
@@ -17,12 +17,11 @@
 - ✅ **نمایش IP، پینگ، آپتایم و وضعیت Bootstrap** هر لوکیشن
 - ✅رفع باگ **Uninstall کامل** با پاک‌سازی تمام فایل‌ها و پروسه‌ها
 - ✅ **سازگاری کامل با پنل سنایی**
-
-
+ - ✅ **دارای وب پنل برای کنترل**
 ## 🚀 نصب سریع و مطمئن، دستور زیر را در سرور لینوکسی خود اجرا کنید.
 
 ```bash
-curl -Ls https://raw.githubusercontent.com/mrmarzx/Tor-ML-PRO/4.2/tor-ml.sh | tr -d '\r' > /root/tor-ml.sh && chmod +x /root/tor-ml.sh && bash /root/tor-ml.sh --install
+curl -Ls https://raw.githubusercontent.com/mrmarzx/Tor-ML-PRO/4.4/tor-ml.sh | tr -d '\r' > /root/tor-ml.sh && chmod +x /root/tor-ml.sh && bash /root/tor-ml.sh --install
 ```
 
 بعد از نصب فقط کافیه بنویسی:
