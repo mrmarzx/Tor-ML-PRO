@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  tor-ml v4.2  –  Multi-Exit Tor + Psiphon Manager
+#  tor-ml v4.3.1  –  Multi-Exit Tor + Psiphon Manager
 #  Modern • Clean • Low-resource • Full featured
 #  Author: mrmarzx  |  2026
 #  Fix: install never clears screen, full visible progress
@@ -8,7 +8,7 @@
 set -euo pipefail
 shopt -s nullglob 2>/dev/null || true
 
-VERSION="4.2.0"
+VERSION="4.3.1"
 
 # Colours
 R='\033[1;31m'; G='\033[1;32m'; Y='\033[1;33m'; B='\033[1;34m'
@@ -248,18 +248,19 @@ running_tor() {
 
 running_psi() {
   local code=$1 port=$2
+  local pid=""
   if [[ -f "$STA/psi_${code}_${port}.pid" ]]; then
-    local pid
     pid=$(cat "$STA/psi_${code}_${port}.pid" 2>/dev/null || true)
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       return 0
     fi
   fi
-  if nc -z 127.0.0.1 "$port" 2>/dev/null; then
+  if pgrep -af psiphon-tunnel-core 2>/dev/null | grep -q "${port}"; then
     return 0
   fi
   return 1
 }
+
 
 running() {
   local id=$1
@@ -536,10 +537,21 @@ write_psi_conf() {
   "EgressRegion": "$code",
   "PropagationChannelId": "FFFFFFFFFFFFFFFF",
   "SponsorId": "FFFFFFFFFFFFFFFF",
+  "ClientPlatform": "Linux",
+  "ClientVersion": "1",
   "DataRootDirectory": "$dir",
   "UseIndistinguishableTLS": true,
   "EmitDiagnosticNotices": true,
-  "EmitBytesTransferred": false
+  "EmitBytesTransferred": false,
+  "RemoteServerListDownloadFilename": "remote_server_list",
+  "RemoteServerListSignaturePublicKey": "MIICIDANBgkqhkiG9w0BAQEFAAOCAg0AMIICCAKCAgEAt7Ls+/39r+T6zNW7GiVpJfzq/xvL9SBH5rIFnk0RXYEYavax3WS6HOD35eTAqn8AniOwiH+DOkvgSKF2caqk/y1dfq47Pdymtwzp9ikpB1C5OfAysXzBiwVJlCdajBKvBZDerV1cMvRzCKvKwRmvDmHgphQQ7WfXIGbRbmmk6opMBh3roE42KcotLFtqp0RRwLtcBRNtCdsrVsjiI1Lqz/lH+T61sGjSjQ3CHMuZYSQJZo/KrvzgQXpkaCTdbObxHqb6/+i1qaVOfEsvjoiyzTxJADvSytVtcTjijhPEV6XskJVHE1Zgl+7rATr/pDQkw6DPCNBS1+Y6fy7GstZALQXwEDN/qhQI9kWkHijT8ns+i1vGg00Mk/6J75arLhqcodWsdeG/M/moWgqQAnlZAGVtJI1OgeF5fsPpXu4kctOfuZlGjVZXQNW34aOzm8r8S0eVZitPlbhcPiR4gT/aSMz/wd8lZlzZYsje/Jr8u/YtlwjjreZrGRmG8KMOzukV3lLmMppXFMvl4bxv6YFEmIuTsOhbLTwFgh7KYNjodLj/LsqRVfwz31PgWQFTEPICV7GCvgVlPRxnofqKSjgTWI4mxDhBpVcATvaoBl1L/6WLbFvBsoAUBItWwctO2xalKxF5szhGm8lccoc5MZr8kfE0uxMgsxz4er68iCID+rsCAQM=",
+  "RemoteServerListUrl": "https://s3.amazonaws.com//psiphon/web/mjr4-p23r-puwl/server_list_compressed",
+  "RemoteServerListURLs": [
+    {
+      "URL": "https://s3.amazonaws.com//psiphon/web/mjr4-p23r-puwl/server_list_compressed",
+      "OnlyAfterAttempts": 0
+    }
+  ]
 }
 EOF
 }
@@ -1061,12 +1073,13 @@ view_log() {
 
 uninstall() {
   header
-  echo -e "  ${R}WARNING: Complete removal of tor-ml + Psiphon data${N}"
+  echo -e "  ${R}WARNING: Complete removal of tor-ml + web panel + data${N}"
   echo
   echo -e "  • All Tor & Psiphon processes will be killed"
-  echo -e "  • $BASE will be deleted"
+  echo -e "  • Web panel service (tor-ml-web) stopped & removed"
+  echo -e "  • $BASE deleted (configs, logs, data, web, binaries)"
   echo -e "  • Command 'tor' removed from /usr/local/bin"
-  echo -e "  • Any leftover socat/auto processes cleaned"
+  echo -e "  • socat/auto balancer cleaned"
   echo
   echo -ne "  Type ${R}YES${N} to confirm: "
   read -r conf
@@ -1074,27 +1087,209 @@ uninstall() {
     echo -e "  ${Y}Cancelled${N}"; sleep 1; return
   fi
   echo
-  echo -e "  ${Y}Stopping everything...${N}"
+  echo -e "  ${Y}[1/5] Stopping tunnels & balancer...${N}"
   pkill -f "node_.*\.conf" 2>/dev/null || true
   pkill -f "psiphon-tunnel-core" 2>/dev/null || true
   pkill -f "socat.*$AUTO_PORT" 2>/dev/null || true
   [[ -f "$AUTO_PID_FILE" ]] && kill "$(cat "$AUTO_PID_FILE")" 2>/dev/null || true
-  sleep 0.8
+  [[ -f "$STA/socat.pid" ]] && kill "$(cat "$STA/socat.pid")" 2>/dev/null || true
+  sleep 0.6
   pkill -9 -f "node_.*\.conf" 2>/dev/null || true
   pkill -9 -f "psiphon-tunnel-core" 2>/dev/null || true
   pkill -9 -f "socat.*$AUTO_PORT" 2>/dev/null || true
-  sleep 0.3
-  echo -e "  ${Y}Removing files...${N}"
+
+  echo -e "  ${Y}[2/5] Stopping web panel service...${N}"
+  systemctl stop tor-ml-web.service 2>/dev/null || true
+  systemctl disable tor-ml-web.service 2>/dev/null || true
+  rm -f /etc/systemd/system/tor-ml-web.service
+  systemctl daemon-reload 2>/dev/null || true
+  pkill -f "/opt/tor-ml/web/panel.py" 2>/dev/null || true
+  pkill -f "panel.py" 2>/dev/null || true
+
+  echo -e "  ${Y}[3/5] Removing install files...${N}"
   rm -rf "$BASE"
+  rm -rf /opt/tor-ml
   rm -f "$CMD"
-  rm -rf /opt/tor-ml 2>/dev/null || true
-  echo -e "  ${G}✓ tor-ml completely removed from the system.${N}"
+  rm -f /usr/local/bin/tor
+  rm -f /root/tor-ml.sh /root/panel.py /root/tor-ml.sh~ 2>/dev/null || true
+  rm -f /tmp/psilist.bin 2>/dev/null || true
+
+  echo -e "  ${Y}[4/5] Cleaning leftover processes...${N}"
+  sleep 0.2
+  pkill -9 -f "psiphon-tunnel-core" 2>/dev/null || true
+  pkill -9 -f "node_.*\.conf" 2>/dev/null || true
+
+  echo -e "  ${Y}[5/5] Done${N}"
+  echo -e "  ${G}✓ tor-ml, web panel, Tor data and all related files removed.${N}"
   exit 0
 }
 
 # =============================================================================
 # INSTALL – NEVER calls clear / header. Full visible progress.
 # =============================================================================
+
+# ---------------------------------------------------------------------------
+# Machine interface (web panel + automation)
+# ---------------------------------------------------------------------------
+json_status() {
+  load_perf
+  local cpu mem
+  cpu=$(awk '/cpu /{u=$2+$4; t=$2+$4+$5; if(t>0) printf "%.1f", u/t*100; else print 0; exit}' /proc/stat)
+  mem=$(awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{if(t) printf "%.1f", (t-a)/t*100; else print 0}' /proc/meminfo)
+  local bal_active=false bal_target="" best_id=""
+  if [[ -f "$AUTO_PID_FILE" ]] && kill -0 "$(cat "$AUTO_PID_FILE" 2>/dev/null)" 2>/dev/null; then
+    bal_active=true
+  fi
+  [[ -f "$STA/best.port" ]] && bal_target=$(cat "$STA/best.port" 2>/dev/null || true)
+  [[ -f "$STA/best.id" ]] && best_id=$(cat "$STA/best.id" 2>/dev/null || true)
+  local sticky_g=0
+  [[ -f "$GLOBAL" ]] && grep -q 'sticky=1' "$GLOBAL" 2>/dev/null && sticky_g=1
+  printf '{"ok":true,"version":"%s","mode":"%s","cpu":%s,"mem":%s,' "$VERSION" "$PERF_MODE" "${cpu:-0}" "${mem:-0}"
+  printf '"sticky_global":%s,"balancer":{"active":%s,"port":%s,"target":"%s","best_id":"%s"},' \
+    "$sticky_g" "$bal_active" "$AUTO_PORT" "$bal_target" "$best_id"
+  printf '"locations":['
+  local first=1 run_count=0 id code name port typ is_run pid pcpu pmem
+  for id in "${TOR_ORDER[@]}" "${PSI_ORDER[@]}"; do
+    IFS='|' read -r code name port <<< "$(info "$id")"
+    if is_tor_id "$id"; then typ="tor"; else typ="psi"; fi
+    is_run=false; pcpu=null; pmem=null; pid=""
+    if running "$id"; then
+      is_run=true; run_count=$((run_count+1))
+      pid=$(get_pid "$id")
+      if [[ -n "$pid" ]]; then
+        pcpu=$(ps -p "$pid" -o %cpu= 2>/dev/null | tr -d ' ' || echo null)
+        pmem=$(ps -p "$pid" -o rss= 2>/dev/null | awk '{printf "%.1f", $1/1024}' || echo null)
+        [[ -z "$pcpu" ]] && pcpu=null
+        [[ -z "$pmem" ]] && pmem=null
+      fi
+    fi
+    [[ $first -eq 1 ]] || printf ','
+    first=0
+    name=${name//\"/}
+    printf '{"id":"%s","type":"%s","code":"%s","name":"%s","port":%s,"running":%s,"cpu_pct":%s,"mem_mb":%s,"latency":null,"ip":null}' \
+      "$id" "$typ" "$code" "$name" "$port" "$is_run" "${pcpu:-null}" "${pmem:-null}"
+  done
+  printf '],"running_count":%s}\n' "$run_count"
+}
+
+json_log() {
+  local id code name port file
+  id=$(parse_id "${1:-}")
+  [[ -z "$id" ]] && { echo '{"ok":false,"log":"invalid id"}'; return 1; }
+  IFS='|' read -r code name port <<< "$(info "$id")"
+  if is_tor_id "$id"; then file="$LOG/tor_${code}_${port}.log"; else file="$LOG/psi_${code}_${port}.log"; fi
+  python3 - "$file" <<'PY'
+import json,sys
+p=sys.argv[1]
+try:
+  lines=open(p,errors="replace").read().splitlines()[-100:]
+  print(json.dumps({"ok":True,"log":"\n".join(lines)}))
+except Exception:
+  print(json.dumps({"ok":True,"log":"(no log file)"}))
+PY
+}
+
+cli_start_all_tor() { local id; for id in "${TOR_ORDER[@]}"; do start_one "$id" || true; done; }
+cli_start_all_psi() { local id; for id in "${PSI_ORDER[@]}"; do start_one "$id" || true; done; }
+
+
+ping_one() {
+  local id code name port
+  id=$(parse_id "${1:-}")
+  [[ -z "$id" ]] && { echo "invalid id"; return 1; }
+  IFS='|' read -r code name port <<< "$(info "$id")"
+  if ! running "$id"; then
+    echo "$id $name not running"
+    return 1
+  fi
+  local lat ip
+  lat=$(curl --socks5-hostname "127.0.0.1:$port" -o /dev/null -s -w "%{time_total}" --max-time 8 "https://www.cloudflare.com/cdn-cgi/trace" 2>/dev/null || echo "fail")
+  if [[ "$lat" == "fail" ]]; then
+    echo "$id $name port=$port latency=FAIL ip=?"
+    return 1
+  fi
+  lat=$(awk -v t="$lat" 'BEGIN{printf "%.0f", t*1000}')
+  ip=$(curl --socks5-hostname "127.0.0.1:$port" -s --max-time 8 "https://api.ipify.org" 2>/dev/null || echo "?")
+  echo "$id $name port=$port latency=${lat}ms ip=$ip"
+}
+
+ping_test() {
+  local id any=0
+  echo "=== Ping test (running exits) ==="
+  for id in "${TOR_ORDER[@]}" "${PSI_ORDER[@]}"; do
+    if running "$id"; then
+      any=1
+      ping_one "$id" || true
+    fi
+  done
+  [[ $any -eq 0 ]] && echo "No running locations"
+}
+
+install_web_panel() {
+  need_root
+  local webdir="$BASE/web"
+  mkdir -p "$webdir" "$CFG"
+  local src=""
+  if [[ -f "$(dirname "${BASH_SOURCE[0]}")/web/panel.py" ]]; then src="$(dirname "${BASH_SOURCE[0]}")/web/panel.py"
+  elif [[ -f /root/panel.py ]]; then src=/root/panel.py
+  elif [[ -f "$webdir/panel.py" ]]; then src="$webdir/panel.py"
+  fi
+  if [[ -n "$src" && "$src" != "$webdir/panel.py" ]]; then tr -d '\r' < "$src" > "$webdir/panel.py"; fi
+  if [[ ! -f "$webdir/panel.py" ]]; then
+    echo -e "  ${Y}panel.py not found – put it at $webdir/panel.py then: tor --install-web${N}"
+    return 1
+  fi
+  chmod +x "$webdir/panel.py"
+
+  local p_user="admin" p_pass="admin123" p_port="8080" p_host="0.0.0.0"
+  echo
+  echo -e "  ${C}Web panel admin setup${N}"
+  echo -ne "  Username [${W}admin${N}]: "; read -r p_user; p_user=${p_user:-admin}
+  echo -ne "  Password [${W}admin123${N}]: "; read -r p_pass; p_pass=${p_pass:-admin123}
+  echo -ne "  Panel port [${W}8080${N}]: "; read -r p_port; p_port=${p_port:-8080}
+  echo -ne "  Bind host [${W}0.0.0.0${N}]: "; read -r p_host; p_host=${p_host:-0.0.0.0}
+
+  PANEL_USER="$p_user" PANEL_PASS="$p_pass" PANEL_PORT="$p_port" PANEL_HOST="$p_host" python3 - <<'PY'
+import json, hashlib, secrets, pathlib, os
+salt="tor-ml-v4.3.1"
+pw=os.environ.get("PANEL_PASS","admin123")
+h=hashlib.pbkdf2_hmac("sha256", pw.encode(), salt.encode(), 120000).hex()
+path=pathlib.Path("/opt/tor-ml/config/panel.json")
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps({
+  "username": os.environ.get("PANEL_USER","admin"),
+  "password_hash": h,
+  "host": os.environ.get("PANEL_HOST","0.0.0.0"),
+  "port": int(os.environ.get("PANEL_PORT","8080")),
+  "session_secret": secrets.token_hex(32),
+  "setup_done": True
+}, indent=2))
+path.chmod(0o600)
+print("panel.json written")
+PY
+
+  cat > /etc/systemd/system/tor-ml-web.service <<EOF
+[Unit]
+Description=tor-ml Web Control Panel
+After=network.target
+[Service]
+Type=simple
+Environment=TOR_ML_BASE=/opt/tor-ml
+Environment=TOR_ML_CLI=/usr/local/bin/tor
+ExecStart=/usr/bin/python3 /opt/tor-ml/web/panel.py
+Restart=on-failure
+RestartSec=3
+User=root
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now tor-ml-web.service
+  echo -e "  ${G}✓ Web panel → http://SERVER_IP:${p_port}${N}"
+  echo -e "  ${G}  user=${p_user}${N}"
+}
+
+
 install() {
   need_root
 
@@ -1105,14 +1300,22 @@ install() {
 
   if [[ -d "$BASE" ]]; then
     echo -e "  ${Y}Previous installation found at $BASE${N}"
-    echo -ne "  Remove old version and install fresh? [y/N]: "
+    echo -e "  ${C}[u]${N} Update in place (keep data)   ${C}[r]${N} Remove & reinstall   ${C}[n]${N} Cancel"
+    echo -ne "  Choice [u/r/N]: "
     read -r ans
     case "${ans,,}" in
-      y|yes)
+      u|update)
+        echo -e "  ${G}Updating in place...${N}"
+        systemctl stop tor-ml-web.service 2>/dev/null || true
+        ;;
+      r|remove|y|yes)
         echo -e "  ${Y}Cleaning old version...${N}"
         pkill -f "node_.*\.conf" 2>/dev/null || true
         pkill -f "psiphon-tunnel-core" 2>/dev/null || true
         pkill -f "socat.*$AUTO_PORT" 2>/dev/null || true
+        systemctl stop tor-ml-web.service 2>/dev/null || true
+        systemctl disable tor-ml-web.service 2>/dev/null || true
+        rm -f /etc/systemd/system/tor-ml-web.service
         sleep 0.5
         rm -rf "$BASE"
         rm -f "$CMD"
@@ -1128,14 +1331,15 @@ install() {
 
   echo -e "  ${C}[1/6]${N} Updating package lists..."
   apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade tor curl socat python3 2>/dev/null || true
   echo -e "  ${G}      done${N}"
 
-  echo -e "  ${C}[2/6]${N} Installing dependencies (tor, curl, socat, netcat)..."
+  echo -e "  ${C}[2/7]${N} Installing dependencies (tor, curl, socat, netcat, python3)..."
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    tor tor-geoipdb curl bc netcat-openbsd socat >/dev/null 2>&1 || true
+    tor tor-geoipdb curl bc netcat-openbsd socat python3 >/dev/null 2>&1 || true
   echo -e "  ${G}      done${N}"
 
-  echo -e "  ${C}[3/6]${N} Creating debian-tor user if needed..."
+  echo -e "  ${C}[3/7]${N} Creating debian-tor user if needed..."
   if ! id debian-tor &>/dev/null; then
     useradd --system --home-dir /var/lib/tor --shell /usr/sbin/nologin debian-tor 2>/dev/null || true
   fi
@@ -1143,12 +1347,12 @@ install() {
   systemctl disable tor 2>/dev/null || true
   echo -e "  ${G}      done${N}"
 
-  echo -e "  ${C}[4/6]${N} Creating directories..."
+  echo -e "  ${C}[4/7]${N} Creating directories..."
   mkdir -p "$CFG" "$DAT" "$LOG" "$STA" "$BIN" "$PSI"
   chown -R debian-tor:debian-tor "$DAT" "$LOG" 2>/dev/null || true
   echo -e "  ${G}      done${N}"
 
-  echo -e "  ${C}[5/6]${N} Installing tor-ml command..."
+  echo -e "  ${C}[5/7]${N} Installing tor-ml command..."
   # Copy ourselves with CR stripped
   if [[ -f "$0" ]]; then
     tr -d '\r' < "$0" > "$CMD"
@@ -1161,14 +1365,19 @@ install() {
   echo "perf=normal" > "$GLOBAL"
   echo -e "  ${G}      done  →  ${W}$CMD${N}"
 
-  echo -e "  ${C}[6/6]${N} Preparing Psiphon binary (x86_64 only)..."
+  echo -e "  ${C}[6/7]${N} Preparing Psiphon binary (x86_64 only)..."
   ensure_psiphon_binary || true
 
   echo
   echo -e "  ${G}════════════════════════════════════════${N}"
   echo -e "  ${G}✓ Installation complete!${N}"
   echo
-  echo -e "  Run the manager with:  ${W}tor${N}"
+  mkdir -p "$BASE/web"
+  if [[ -f "$(dirname "${BASH_SOURCE[0]}")/web/panel.py" ]]; then tr -d '\r' < "$(dirname "${BASH_SOURCE[0]}")/web/panel.py" > "$BASE/web/panel.py"; fi
+  if [[ -f /root/panel.py ]]; then tr -d '\r' < /root/panel.py > "$BASE/web/panel.py"; fi
+  if [[ -f "$BASE/web/panel.py" ]]; then install_web_panel || true; else echo -e "  ${Y}panel.py missing – copy to /opt/tor-ml/web/panel.py && tor --install-web${N}"; fi
+  echo -e "  CLI:  ${W}tor${N}"
+  echo -e "  Web:  ${W}http://SERVER_IP:8080${N}  (admin / admin123)"
   echo
 }
 
@@ -1235,10 +1444,52 @@ main() {
 }
 
 # Entry
-if [[ "${1:-}" == "--install" ]]; then
-  install
-  exit 0
-fi
+case "${1:-}" in
+  --install) install; exit 0 ;;
+  --install-web) need_root; install_web_panel; exit 0 ;;
+  --json-status)
+    [[ -d "$BASE" ]] || { echo '{"ok":false}'; exit 1; }
+    init_dirs; load_perf; json_status; exit 0 ;;
+  --json-log)
+    [[ -d "$BASE" ]] || exit 1
+    init_dirs; json_log "${2:-}"; exit 0 ;;
+  --start)
+    need_root; init_dirs; load_perf
+    id=$(parse_id "${2:-}"); [[ -n "$id" ]] || { echo invalid; exit 1; }
+    start_one "$id"; exit $? ;;
+  --stop)
+    need_root; init_dirs
+    id=$(parse_id "${2:-}"); [[ -n "$id" ]] || { echo invalid; exit 1; }
+    stop_one "$id"; exit $? ;;
+  --start-all-tor) need_root; init_dirs; load_perf; cli_start_all_tor; exit 0 ;;
+  --start-all-psi) need_root; init_dirs; load_perf; cli_start_all_psi; exit 0 ;;
+  --stop-all) need_root; init_dirs; stop_all; auto_stop 2>/dev/null || true; exit 0 ;;
+  --balancer-start) need_root; init_dirs; load_perf; auto_start; exit 0 ;;
+  --balancer-stop) need_root; init_dirs; auto_stop; exit 0 ;;
+  --set-mode)
+    need_root; init_dirs
+    case "${2:-}" in weak|normal|max) echo "perf=${2}" > "$GLOBAL"; echo "mode=${2}";;
+      *) echo "use weak|normal|max"; exit 1;; esac
+    exit 0 ;;
+  --sticky)
+    need_root; init_dirs
+    if [[ "${2:-}" == "on" ]]; then
+      grep -q 'sticky=' "$GLOBAL" 2>/dev/null && sed -i 's/sticky=.*/sticky=1/' "$GLOBAL" || echo "sticky=1" >> "$GLOBAL"
+    else
+      grep -q 'sticky=' "$GLOBAL" 2>/dev/null && sed -i 's/sticky=.*/sticky=0/' "$GLOBAL" || echo "sticky=0" >> "$GLOBAL"
+    fi
+    exit 0 ;;
+  --speed-test) need_root; init_dirs; speed_test; exit 0 ;;
+  --ping-test) need_root; init_dirs; ping_test; exit 0 ;;
+  --ping-one) need_root; init_dirs; ping_one "${2:-}"; exit $? ;;
+  --change-port)
+    need_root; init_dirs
+    id=$(parse_id "${2:-}"); newport="${3:-}"
+    [[ -n "$id" && -n "$newport" ]] || { echo "usage: --change-port ID PORT"; exit 1; }
+    set_setting "$id" "port" "$newport"
+    echo "saved port $newport for $id (restart location to apply)"
+    exit 0 ;;
+esac
 
 if [[ ! -d "$BASE" ]]; then
   echo -e "${Y}tor-ml is not installed.${N}"
